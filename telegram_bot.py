@@ -54,10 +54,8 @@ def trigger_news_fetch():
 def trigger_video_pipeline(article):
     send_message(f"✅ Anladım! Şu haber için video yapılıyor:\n\n*{article['title']}*\n\n⏳ Pipeline başlıyor...")
     import threading
-    from video_pipeline import main as run_pipeline
-    import sys
-    sys.argv = ["video_pipeline.py", json.dumps(article)]
-    thread = threading.Thread(target=run_pipeline, daemon=True)
+    import video_pipeline
+    thread = threading.Thread(target=video_pipeline.run, args=(article,), daemon=True)
     thread.start()
 
 def process_message(text, articles):
@@ -73,40 +71,4 @@ def process_message(text, articles):
             "/haber → Haberleri şimdi tara\n"
             "/yardim → Bu menüyü göster\n\n"
             "Haber listesi gelince numara yaz (1, 2, 3...)\n"
-            "Hiçbirini istemiyorsan *0* yaz"
-        )
-def main():
-    print(f"[{datetime.now()}] Telegram bot dinleniyor...")
-    send_message("🤖 Bot aktif! /haber yazarak haberleri tarayabilirsin.")
-
-    while True:
-        try:
-            updates = get_updates()
-
-            for update in updates:
-                update_id = update["update_id"]
-                save_last_update_id(update_id)
-
-                if "message" not in update:
-                    continue
-
-                chat_id = str(update["message"]["chat"]["id"])
-                if chat_id != str(TELEGRAM_CHAT_ID):
-                    continue
-
-                text = update["message"].get("text", "")
-                if not text:
-                    continue
-
-                print(f"[{datetime.now()}] Mesaj: {text}")
-                articles = load_pending_news()
-                process_message(text, articles)
-
-            time.sleep(2)
-
-        except Exception as e:
-            print(f"Hata: {e}")
-            time.sleep(5)
-
-if __name__ == "__main__":
-    main()
+            "Hi
