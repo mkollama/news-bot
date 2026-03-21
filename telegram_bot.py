@@ -41,67 +41,34 @@ def load_pending_news():
     except:
         return []
 
+def trigger_news_fetch():
+    send_message("🔍 Haberler taranıyor, biraz bekle...")
+    try:
+        from news_fetcher import fetch_news, filter_with_claude, send_telegram_menu
+        articles = fetch_news()
+        selected = filter_with_claude(articles)
+        send_telegram_menu(selected)
+    except Exception as e:
+        send_message(f"❌ Hata: {str(e)}")
+
 def trigger_video_pipeline(article):
-    """Video pipeline'ını başlat"""
     send_message(f"✅ Anladım! Şu haber için video yapılıyor:\n\n*{article['title']}*\n\n⏳ Pipeline başlıyor...")
-    
-    # video_pipeline.py'yi çağır
     import subprocess
     article_json = json.dumps(article)
     subprocess.Popen(["python", "video_pipeline.py", article_json])
 
 def process_message(text, articles):
     text = text.strip()
-    
-    if text == "0":
-        send_message("👍 Tamam, bu haberleri geçtik. Bir sonraki taramada görüşürüz!")
+
+    if text.lower() in ["/haber", "haber", "/start"]:
+        trigger_news_fetch()
         return
-    
-    try:
-        choice = int(text)
-        if 1 <= choice <= len(articles):
-            selected = articles[choice - 1]
-            trigger_video_pipeline(selected)
-        else:
-            send_message(f"❌ Lütfen 1-{len(articles)} arasında bir sayı yaz.")
-    except ValueError:
-        send_message("❓ Anlamadım. Lütfen sadece bir numara yaz (örn: *1*)")
 
-def main():
-    print(f"[{datetime.now()}] Telegram bot dinleniyor...")
-    
-    while True:
-        try:
-            updates = get_updates()
-            
-            for update in updates:
-                update_id = update["update_id"]
-                save_last_update_id(update_id)
-                
-                if "message" not in update:
-                    continue
-                
-                chat_id = str(update["message"]["chat"]["id"])
-                if chat_id != str(TELEGRAM_CHAT_ID):
-                    continue
-                
-                text = update["message"].get("text", "")
-                if not text:
-                    continue
-                
-                print(f"Mesaj alındı: {text}")
-                articles = load_pending_news()
-                
-                if articles:
-                    process_message(text, articles)
-                else:
-                    send_message("📭 Şu an bekleyen haber yok.")
-            
-            time.sleep(2)
-            
-        except Exception as e:
-            print(f"Hata: {e}")
-            time.sleep(5)
-
-if __name__ == "__main__":
-    main()
+    if text.lower() == "/yardim":
+        send_message(
+            "🤖 *Komutlar:*\n\n"
+            "/haber → Haberleri şimdi tara\n"
+            "/yardim → Bu menüyü göster\n\n"
+            "Haber listesi gelince numara yaz (1, 2, 3...)\n"
+            "Hiçbirini istemiyorsan *0* yaz"
+        )
