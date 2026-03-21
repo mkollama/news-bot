@@ -119,4 +119,83 @@ def create_simple_video(audio_path, title, output_path):
         "ffmpeg",
         "-f", "lavfi", "-i", "color=c=black:size=1920x1080:rate=30",
         "-i", str(audio_path),
-        "-vf", f"drawtext=text='{safe_title}'
+        "-vf", f"drawtext=text='{safe_title}':fontcolor=white:fontsize=40:x=(w-text_w)/2:y=(h-text_h)/2:box=1:boxcolor=black@0.5:boxborderw=20",
+        "-map", "0:v", "-map", "1:a",
+        "-c:v", "libx264", "-c:a", "aac",
+        "-shortest", str(output_path), "-y"
+    ], check=True)
+    print(f"✅ Video oluşturuldu: {output_path}")
+    return output_path
+
+def generate_metadata(article):
+    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+    response = client.messages.create(
+        model="claude-opus-4-20250514",
+        max_tokens=500,
+        messages=[{
+            "role": "user",
+            "content": f"""Create YouTube metadata for this video. Return ONLY valid JSON, nothing else.
+
+Article: {article['title']}
+
+Return exactly this JSON format:
+{{
+  "title": "Engaging YouTube title max 70 chars",
+  "description": "YouTube description 2-3 paragraphs with keywords and subscribe CTA",
+  "tags": ["tag1", "tag2", "tag3", "tag4", "tag5", "tag6", "tag7", "tag8"]
+}}"""
+        }]
+    )
+    try:
+        text = response.content[0].text.strip()
+        text = text.replace("```json", "").replace("```", "").strip()
+        return json.loads(text)
+    except:
+        return {
+            "title": article['title'][:70],
+            "description": f"In this video, we cover: {article['title']}\n\nSubscribe for more US political news!",
+            "tags": ["US politics", "news", "Trump", "Congress", "Washington"]
+        }
+
+def run(article):
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    send_telegram(f"🚀 Video pipeline başladı!\n\n*{article['title']}*")
+
+    try:
+        # 1. Script
+        script = generate_script(article)
+        script_path = OUTPUT_DIR / f"script_{timestamp}.txt"
+        with open(script_path, "w") as f:
+            f.write(script)
+
+        # 2. Ses
+        audio_path = OUTPUT_DIR / f"audio_{timestamp}.mp3"
+        generate_audio(script, audio_path)
+
+        # 3. Video (siyah arka plan + başlık + ses)
+        final_video = OUTPUT_DIR / f"final_{timestamp}.mp4"
+        create_simple_video(audio_path, article['title'], final_video)
+
+        # 4. Metadata
+        metadata = generate_metadata(article)
+        metadata_path = OUTPUT_DIR / f"metadata_{timestamp}.json"
+        with open(metadata_path, "w") as f:
+            json.dump(metadata, f, ensure_ascii=False, indent=2)
+
+        send_telegram(
+            f"✅ *Video hazır!*\n\n"
+            f"📺 Başlık: {metadata['title']}\n\n"
+            f"⚠️ YouTube OAuth henüz kurulmadı, manuel yükleme gerekiyor.\n"
+            f"📁 Dosya: final_{timestamp}.mp4"
+        )
+
+    except Exception as e:
+        error_msg = f"❌ Pipeline hatası: {str(e)}"
+        print(error_msg)
+        send_telegram(error_msg)
+
+if __name__ == "__main__":
+    import sys
+    if len(sys.argv) > 1:
+        article = json.loads(sys.argv[1])
+        run(article)
