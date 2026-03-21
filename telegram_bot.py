@@ -75,3 +75,38 @@ def process_message(text, articles):
             "Haber listesi gelince numara yaz (1, 2, 3...)\n"
             "Hiçbirini istemiyorsan *0* yaz"
         )
+def main():
+    print(f"[{datetime.now()}] Telegram bot dinleniyor...")
+    send_message("🤖 Bot aktif! /haber yazarak haberleri tarayabilirsin.")
+
+    while True:
+        try:
+            updates = get_updates()
+
+            for update in updates:
+                update_id = update["update_id"]
+                save_last_update_id(update_id)
+
+                if "message" not in update:
+                    continue
+
+                chat_id = str(update["message"]["chat"]["id"])
+                if chat_id != str(TELEGRAM_CHAT_ID):
+                    continue
+
+                text = update["message"].get("text", "")
+                if not text:
+                    continue
+
+                print(f"[{datetime.now()}] Mesaj: {text}")
+                articles = load_pending_news()
+                process_message(text, articles)
+
+            time.sleep(2)
+
+        except Exception as e:
+            print(f"Hata: {e}")
+            time.sleep(5)
+
+if __name__ == "__main__":
+    main()
