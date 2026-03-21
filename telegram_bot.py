@@ -53,9 +53,12 @@ def trigger_news_fetch():
 
 def trigger_video_pipeline(article):
     send_message(f"✅ Anladım! Şu haber için video yapılıyor:\n\n*{article['title']}*\n\n⏳ Pipeline başlıyor...")
-    import subprocess
-    article_json = json.dumps(article)
-    subprocess.Popen(["python", "video_pipeline.py", article_json])
+    import threading
+    from video_pipeline import main as run_pipeline
+    import sys
+    sys.argv = ["video_pipeline.py", json.dumps(article)]
+    thread = threading.Thread(target=run_pipeline, daemon=True)
+    thread.start()
 
 def process_message(text, articles):
     text = text.strip()
