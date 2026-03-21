@@ -1,5 +1,4 @@
 import threading
-import subprocess
 import time
 import os
 import requests
@@ -20,31 +19,42 @@ def send_telegram(text):
         pass
 
 def run_scheduler():
-    subprocess.run(["python", "scheduler.py"])
+    import schedule
+    import time
+    from news_fetcher import fetch_news, filter_with_claude, send_telegram_menu
+    from datetime import datetime
+
+    def job():
+        print(f"[{datetime.now()}] Haber tarama başlıyor...")
+        articles = fetch_news()
+        selected = filter_with_claude(articles)
+        send_telegram_menu(selected)
+
+    schedule.every().day.at("06:00").do(job)
+    schedule.every().day.at("14:00").do(job)
+    schedule.every().day.at("22:00").do(job)
+
+    print("📅 Scheduler başladı!")
+    while True:
+        schedule.run_pending()
+        time.sleep(60)
 
 def run_telegram_bot():
-    subprocess.run(["python", "telegram_bot.py"])
+    from telegram_bot import main
+    main()
 
 def main():
     print(f"[{datetime.now()}] 🚀 News Bot başlıyor...")
-    
-    send_telegram(
-        "🤖 *News Bot aktif!*\n\n"
-        "📅 Haberler günde 3 kez taranacak (06:00, 14:00, 22:00)\n"
-        "📱 Yeni haberler geldiğinde buraya bildirim alacaksın\n\n"
-        "Hazır! 🎬"
-    )
-    
-    # İki servisi paralel çalıştır
+    send_telegram("🤖 *News Bot aktif!*\n\n/haber yazarak haberleri tarayabilirsin.")
+
     scheduler_thread = threading.Thread(target=run_scheduler, daemon=True)
     bot_thread = threading.Thread(target=run_telegram_bot, daemon=True)
-    
+
     scheduler_thread.start()
     bot_thread.start()
-    
+
     print("✅ Scheduler ve Telegram bot çalışıyor!")
-    
-    # Ana thread canlı tut
+
     while True:
         time.sleep(60)
 
