@@ -39,7 +39,7 @@ Summary: {article['summary']}
 Source: {article['source']}
 
 SCRIPT REQUIREMENTS:
-- Duration: 10-12 minutes when read at normal pace
+- Duration: 6-12 minutes when read at normal pace (~800-1500 words)
 - Style: Professional news anchor, engaging, clear
 - Structure:
   * Hook (30 sec): Dramatic opening
