@@ -24,94 +24,70 @@ def send_telegram(text):
         "parse_mode": "Markdown"
     })
 
-def generate_script(article):
-    send_telegram("Script yaziliyor...")
+def send_telegram_photo(photo_url, caption):
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto"
+    requests.post(url, json={
+        "chat_id": TELEGRAM_CHAT_ID,
+        "photo": photo_url,
+        "caption": caption
+    })
+
+def detect_people_and_topics(article):
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
     response = client.messages.create(
         model="claude-opus-4-20250514",
-        max_tokens=4000,
+        max_tokens=500,
         messages=[{
             "role": "user",
-            "content": f"""You are a professional YouTube news channel scriptwriter. Write an engaging 6-10 minute video script about this news story.
+            "content": f"""Analyze this news article and extract key information. Return ONLY valid JSON.
 
-NEWS:
 Title: {article['title']}
 Summary: {article['summary']}
-Source: {article['source']}
 
-SCRIPT REQUIREMENTS:
-- Duration: 6-10 minutes when read at normal pace (~800-1200 words)
-- Style: Professional news anchor, engaging, clear
-- Structure:
-  * Hook (30 sec): Dramatic opening
-  * Introduction (1 min): What happened and why it matters
-  * Background (2 min): Context and history
-  * Main story (3-4 min): Detailed breakdown
-  * Conclusion (30 sec): Summary and call to action
+Return exactly this format:
+{{
+  "people": ["Person Name 1", "Person Name 2"],
+  "main_person": "Most important person in the story",
+  "topics": ["topic1", "topic2"],
+  "pexels_query": "best search query for stock footage (e.g. 'US Capitol Congress', 'White House Washington', 'courthouse justice')",
+  "cover_query": "search query for cover image"
+}}
 
-IMPORTANT:
-- Write ONLY the spoken words, no stage directions, no brackets
-- Use short, clear sentences
-- Keep it factual and professional
-
-Write the complete script now:"""
+People should be real named individuals mentioned. Topics should be general themes."""
         }]
     )
-    script = response.content[0].text
-    print(f"Script yazildi: {len(script)} karakter")
-    return script
+    try:
+        text = response.content[0].text.strip()
+        return json.loads(text)
+    except:
+        return {
+            "people": [],
+            "main_person": "",
+            "topics": ["US politics"],
+            "pexels_query": "Washington DC politics",
+            "cover_query": "US Capitol"
+        }
 
-def generate_audio(script, output_path):
-    send_telegram("Seslendirme yapiliyor...")
-    url = f"https://api.elevenlabs.io/v1/text-to-speech/{VOICE_ID}"
-    headers = {
-        "xi-api-key": ELEVENLABS_API_KEY,
-        "Content-Type": "application/json"
-    }
-    chunks = [script[i:i+4500] for i in range(0, len(script), 4500)]
-    audio_files = []
-
-    for i, chunk in enumerate(chunks):
-        chunk_path = OUTPUT_DIR / f"audio_chunk_{i}.mp3"
-        response = requests.post(url, headers=headers, json={
-            "text": chunk,
-            "model_id": "eleven_turbo_v2_5",
-            "voice_settings": {
-                "stability": 0.75,
-                "similarity_boost": 0.75
-            }
-        })
-        if response.status_code == 200:
-            with open(chunk_path, "wb") as f:
-                f.write(response.content)
-            audio_files.append(str(chunk_path))
-        else:
-            raise Exception(f"ElevenLabs hatasi: {response.status_code} - {response.text}")
-
-    if len(audio_files) == 1:
-        import shutil
-        shutil.copy(audio_files[0], output_path)
-    else:
-        list_file = OUTPUT_DIR / "audio_list.txt"
-        with open(list_file, "w") as f:
-            for af in audio_files:
-                f.write(f"file '{os.path.abspath(af)}'\n")
-        subprocess.run([
-            "ffmpeg", "-f", "concat", "-safe", "0",
-            "-i", str(list_file), "-c", "copy", str(output_path), "-y"
-        ], check=True)
-        for af in audio_files:
-            os.remove(af)
-        os.remove(list_file)
-
-    return output_path
-
-def get_audio_duration(audio_path):
-    result = subprocess.run([
-        "ffprobe", "-v", "error", "-show_entries", "format=duration",
-        "-of", "default=noprint_wrappers=1:nokey=1", str(audio_path)
-    ], capture_output=True, text=True)
-    return float(result.stdout.strip())
+def get_wikipedia_photo(person_name):
+    try:
+        search_url = "https://en.wikipedia.org/w/api.php"
+        params = {
+            "action": "query",
+            "titles": person_name,
+            "prop": "pageimages",
+            "format": "json",
+            "pithumbsize": 500
+        }
+        response = requests.get(search_url, params=params, timeout=10)
+        data = response.json()
+        pages = data.get("query", {}).get("pages", {})
+        for page in pages.values():
+            thumb = page.get("thumbnail", {})
+            if thumb:
+                return thumb.get("source")
+    except:
+        pass
+    return None
 
 def fetch_pexels_videos(query, count=5):
     if not PEXELS_API_KEY:
@@ -170,7 +146,14 @@ def get_video_duration(video_path):
     try:
         return float(result.stdout.strip())
     except:
-        return 10.0
+        return 8.0
+
+def get_audio_duration(audio_path):
+    result = subprocess.run([
+        "ffprobe", "-v", "error", "-show_entries", "format=duration",
+        "-of", "default=noprint_wrappers=1:nokey=1", str(audio_path)
+    ], capture_output=True, text=True)
+    return float(result.stdout.strip())
 
 def build_video_from_clips(clips, audio_path, audio_duration, output_path):
     normalized = []
@@ -184,7 +167,6 @@ def build_video_from_clips(clips, audio_path, audio_duration, output_path):
         ], check=True, capture_output=True)
         normalized.append(norm)
 
-    list_file = OUTPUT_DIR / "clips_list.txt"
     total = 0.0
     loop_clips = []
     while total < audio_duration:
@@ -195,6 +177,7 @@ def build_video_from_clips(clips, audio_path, audio_duration, output_path):
             if total >= audio_duration:
                 break
 
+    list_file = OUTPUT_DIR / "clips_list.txt"
     with open(list_file, "w") as f:
         for c in loop_clips:
             f.write(f"file '{os.path.abspath(c)}'\n")
@@ -219,27 +202,31 @@ def build_video_from_clips(clips, audio_path, audio_duration, output_path):
         except:
             pass
 
-def create_video(article, audio_path, output_path):
+def create_video(article, audio_path, output_path, analysis):
     send_telegram("Video olusturuluyor...")
 
     audio_duration = get_audio_duration(audio_path)
-    title = article['title']
-
-    # Arama terimi oluştur
-    query = "Washington DC Congress politics"
-    if "trump" in title.lower():
-        query = "White House Washington politics"
-    elif "court" in title.lower() or "trial" in title.lower():
-        query = "courthouse justice law"
-    elif "senate" in title.lower() or "congress" in title.lower():
-        query = "US Capitol Congress"
-    elif "election" in title.lower():
-        query = "election voting America"
-
     clips = []
 
-    # Pexels'dan video indir
-    video_urls = fetch_pexels_videos(query, count=5)
+    # 1. Haberdeki kisilerin Wikipedia fotograflari
+    people = analysis.get("people", [])
+    for i, person in enumerate(people[:4]):
+        photo_url = get_wikipedia_photo(person)
+        if photo_url:
+            try:
+                photo_path = OUTPUT_DIR / f"person_{i}.jpg"
+                download_file(photo_url, photo_path)
+                video_path = OUTPUT_DIR / f"person_video_{i}.mp4"
+                photo_to_video(photo_path, 6, video_path)
+                clips.append(video_path)
+                os.remove(photo_path)
+                print(f"Wikipedia fotografi alindi: {person}")
+            except Exception as e:
+                print(f"Wikipedia hatasi {person}: {e}")
+
+    # 2. Pexels stock video
+    pexels_query = analysis.get("pexels_query", "Washington DC politics")
+    video_urls = fetch_pexels_videos(pexels_query, count=5)
     for i, url in enumerate(video_urls[:3]):
         try:
             path = OUTPUT_DIR / f"pexels_video_{i}.mp4"
@@ -248,13 +235,12 @@ def create_video(article, audio_path, output_path):
         except:
             pass
 
-    # Yeterli video yoksa fotoğraflardan video yap
+    # 3. Yeterli yoksa Pexels fotograf
     if len(clips) < 3:
-        photo_urls = fetch_pexels_photos(query, count=8)
+        photo_urls = fetch_pexels_photos(pexels_query, count=8)
         for i, url in enumerate(photo_urls[:6]):
             try:
-                ext = "jpg"
-                photo_path = OUTPUT_DIR / f"pexels_photo_{i}.{ext}"
+                photo_path = OUTPUT_DIR / f"pexels_photo_{i}.jpg"
                 download_file(url, photo_path)
                 video_path = OUTPUT_DIR / f"photo_video_{i}.mp4"
                 photo_to_video(photo_path, 8, video_path)
@@ -266,7 +252,6 @@ def create_video(article, audio_path, output_path):
     if clips:
         build_video_from_clips(clips, audio_path, audio_duration, output_path)
     else:
-        # Fallback: siyah ekran
         subprocess.run([
             "ffmpeg", "-f", "lavfi", "-i", "color=c=black:size=1920x1080:rate=30",
             "-i", str(audio_path),
@@ -275,12 +260,114 @@ def create_video(article, audio_path, output_path):
             str(output_path), "-y"
         ], check=True)
 
-    # Geçici dosyaları temizle
     for clip in clips:
         try:
             os.remove(clip)
         except:
             pass
+
+def send_cover_suggestion(article, analysis):
+    main_person = analysis.get("main_person", "")
+    cover_url = None
+
+    if main_person:
+        cover_url = get_wikipedia_photo(main_person)
+
+    if cover_url:
+        send_telegram_photo(
+            cover_url,
+            f"Kapak fotografi onerisi: {main_person}\n\nYouTube'da manuel olarak yukle!"
+        )
+    else:
+        cover_query = analysis.get("cover_query", "US Capitol")
+        photos = fetch_pexels_photos(cover_query, count=1)
+        if photos:
+            send_telegram_photo(
+                photos[0],
+                f"Kapak fotografi onerisi (Pexels)\n\nYouTube'da manuel olarak yukle!"
+            )
+        else:
+            send_telegram("Kapak fotografi bulunamadi, manuel ekle!")
+
+def generate_script(article):
+    send_telegram("Script yaziliyor...")
+    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+    response = client.messages.create(
+        model="claude-opus-4-20250514",
+        max_tokens=4000,
+        messages=[{
+            "role": "user",
+            "content": f"""You are a professional YouTube news channel scriptwriter. Write an engaging 6-10 minute video script about this news story.
+
+NEWS:
+Title: {article['title']}
+Summary: {article['summary']}
+Source: {article['source']}
+
+SCRIPT REQUIREMENTS:
+- Duration: 6-10 minutes when read at normal pace (~800-1200 words)
+- Style: Professional news anchor, engaging, clear
+- Structure:
+  * Hook (30 sec): Dramatic opening
+  * Introduction (1 min): What happened and why it matters
+  * Background (2 min): Context and history
+  * Main story (3-4 min): Detailed breakdown
+  * Conclusion (30 sec): Summary and call to action
+
+IMPORTANT:
+- Write ONLY the spoken words, no stage directions, no brackets
+- Use short, clear sentences
+- Keep it factual and professional
+
+Write the complete script now:"""
+        }]
+    )
+    return response.content[0].text
+
+def generate_audio(script, output_path):
+    send_telegram("Seslendirme yapiliyor...")
+    url = f"https://api.elevenlabs.io/v1/text-to-speech/{VOICE_ID}"
+    headers = {
+        "xi-api-key": ELEVENLABS_API_KEY,
+        "Content-Type": "application/json"
+    }
+    chunks = [script[i:i+4500] for i in range(0, len(script), 4500)]
+    audio_files = []
+
+    for i, chunk in enumerate(chunks):
+        chunk_path = OUTPUT_DIR / f"audio_chunk_{i}.mp3"
+        response = requests.post(url, headers=headers, json={
+            "text": chunk,
+            "model_id": "eleven_turbo_v2_5",
+            "voice_settings": {
+                "stability": 0.75,
+                "similarity_boost": 0.75
+            }
+        })
+        if response.status_code == 200:
+            with open(chunk_path, "wb") as f:
+                f.write(response.content)
+            audio_files.append(str(chunk_path))
+        else:
+            raise Exception(f"ElevenLabs hatasi: {response.status_code} - {response.text}")
+
+    if len(audio_files) == 1:
+        import shutil
+        shutil.copy(audio_files[0], output_path)
+    else:
+        list_file = OUTPUT_DIR / "audio_list.txt"
+        with open(list_file, "w") as f:
+            for af in audio_files:
+                f.write(f"file '{os.path.abspath(af)}'\n")
+        subprocess.run([
+            "ffmpeg", "-f", "concat", "-safe", "0",
+            "-i", str(list_file), "-c", "copy", str(output_path), "-y"
+        ], check=True)
+        for af in audio_files:
+            os.remove(af)
+        os.remove(list_file)
+
+    return output_path
 
 def generate_metadata(article):
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
@@ -312,25 +399,30 @@ def run(article):
     send_telegram(f"Video pipeline basladi!\n\n{article['title']}")
 
     try:
+        analysis = detect_people_and_topics(article)
+        people = analysis.get("people", [])
+        if people:
+            send_telegram(f"Haberdeki kisiler: {', '.join(people)}")
+
         script = generate_script(article)
-        script_path = OUTPUT_DIR / f"script_{timestamp}.txt"
-        with open(script_path, "w") as f:
+        with open(OUTPUT_DIR / f"script_{timestamp}.txt", "w") as f:
             f.write(script)
 
         audio_path = OUTPUT_DIR / f"audio_{timestamp}.mp3"
         generate_audio(script, audio_path)
 
         final_video = OUTPUT_DIR / f"final_{timestamp}.mp4"
-        create_video(article, audio_path, final_video)
+        create_video(article, audio_path, final_video, analysis)
 
         metadata = generate_metadata(article)
-        metadata_path = OUTPUT_DIR / f"metadata_{timestamp}.json"
-        with open(metadata_path, "w") as f:
+        with open(OUTPUT_DIR / f"metadata_{timestamp}.json", "w") as f:
             json.dump(metadata, f, ensure_ascii=False, indent=2)
 
         send_telegram(f"Video hazir! Baslik: {metadata['title']}\n\nYouTube yuklemesi basliyor...")
         import youtube_uploader
         youtube_uploader.upload(str(final_video), metadata)
+
+        send_cover_suggestion(article, analysis)
 
     except Exception as e:
         error_msg = f"Pipeline hatasi: {str(e)}"
