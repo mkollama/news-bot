@@ -169,12 +169,9 @@ def run(article):
         with open(metadata_path, "w") as f:
             json.dump(metadata, f, ensure_ascii=False, indent=2)
 
-        send_telegram(
-            f"Video hazir!\n\n"
-            f"Baslik: {metadata['title']}\n\n"
-            f"YouTube OAuth henuz kurulmadi, manuel yukleme gerekiyor.\n"
-            f"Dosya: final_{timestamp}.mp4"
-        )
+        send_telegram (f"Video hazir! Baslik: {metadata['title']}\n\nYouTube yuklemesi basliyor...")
+        import youtube_uploader
+        youtube_uploader.upload(str(final_video), metadata)
 
     except Exception as e:
         error_msg = f"Pipeline hatasi: {str(e)}"
