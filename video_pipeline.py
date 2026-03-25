@@ -10,6 +10,7 @@ ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
 ELEVENLABS_API_KEY = os.environ.get("ELEVENLABS_API_KEY")
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
+PEXELS_API_KEY = os.environ.get("PEXELS_API_KEY")
 
 VOICE_ID = "21m00Tcm4TlvDq8ikWAM"
 OUTPUT_DIR = Path("output_videos")
@@ -31,7 +32,7 @@ def generate_script(article):
         max_tokens=4000,
         messages=[{
             "role": "user",
-            "content": f"""You are a professional YouTube news channel scriptwriter. Write an engaging 10-12 minute video script about this news story.
+            "content": f"""You are a professional YouTube news channel scriptwriter. Write an engaging 6-10 minute video script about this news story.
 
 NEWS:
 Title: {article['title']}
@@ -39,14 +40,13 @@ Summary: {article['summary']}
 Source: {article['source']}
 
 SCRIPT REQUIREMENTS:
-- Duration: 6-12 minutes when read at normal pace (~800-1500 words)
+- Duration: 6-10 minutes when read at normal pace (~800-1200 words)
 - Style: Professional news anchor, engaging, clear
 - Structure:
   * Hook (30 sec): Dramatic opening
   * Introduction (1 min): What happened and why it matters
   * Background (2 min): Context and history
-  * Main story (5-6 min): Detailed breakdown
-  * Analysis (2 min): What this means going forward
+  * Main story (3-4 min): Detailed breakdown
   * Conclusion (30 sec): Summary and call to action
 
 IMPORTANT:
@@ -85,7 +85,6 @@ def generate_audio(script, output_path):
             with open(chunk_path, "wb") as f:
                 f.write(response.content)
             audio_files.append(str(chunk_path))
-            print(f"Ses parcasi {i+1}/{len(chunks)} olusturuldu")
         else:
             raise Exception(f"ElevenLabs hatasi: {response.status_code} - {response.text}")
 
@@ -105,23 +104,183 @@ def generate_audio(script, output_path):
             os.remove(af)
         os.remove(list_file)
 
-    print("Seslendirme tamamlandi")
     return output_path
 
-def create_simple_video(audio_path, title, output_path):
-    send_telegram("Video olusturuluyor...")
-    safe_title = title[:60].replace("'", "").replace(":", "-").replace('"', '')
-    subprocess.run([
-        "ffmpeg",
-        "-f", "lavfi", "-i", "color=c=black:size=1920x1080:rate=30",
-        "-i", str(audio_path),
-        "-vf", f"drawtext=text='{safe_title}':fontcolor=white:fontsize=40:x=(w-text_w)/2:y=(h-text_h)/2",
-        "-map", "0:v", "-map", "1:a",
-        "-c:v", "libx264", "-c:a", "aac",
-        "-shortest", str(output_path), "-y"
-    ], check=True)
-    print(f"Video olusturuldu: {output_path}")
+def get_audio_duration(audio_path):
+    result = subprocess.run([
+        "ffprobe", "-v", "error", "-show_entries", "format=duration",
+        "-of", "default=noprint_wrappers=1:nokey=1", str(audio_path)
+    ], capture_output=True, text=True)
+    return float(result.stdout.strip())
+
+def fetch_pexels_videos(query, count=5):
+    if not PEXELS_API_KEY:
+        return []
+    headers = {"Authorization": PEXELS_API_KEY}
+    response = requests.get(
+        "https://api.pexels.com/videos/search",
+        headers=headers,
+        params={"query": query, "per_page": count, "min_duration": 5}
+    )
+    if response.status_code != 200:
+        return []
+    videos = response.json().get("videos", [])
+    result = []
+    for v in videos:
+        files = v.get("video_files", [])
+        hd = [f for f in files if f.get("quality") in ["hd", "sd"]]
+        if hd:
+            result.append(hd[0]["link"])
+    return result
+
+def fetch_pexels_photos(query, count=8):
+    if not PEXELS_API_KEY:
+        return []
+    headers = {"Authorization": PEXELS_API_KEY}
+    response = requests.get(
+        "https://api.pexels.com/v1/search",
+        headers=headers,
+        params={"query": query, "per_page": count}
+    )
+    if response.status_code != 200:
+        return []
+    photos = response.json().get("photos", [])
+    return [p["src"]["large"] for p in photos]
+
+def download_file(url, output_path):
+    response = requests.get(url, stream=True, timeout=30)
+    with open(output_path, "wb") as f:
+        for chunk in response.iter_content(chunk_size=8192):
+            f.write(chunk)
     return output_path
+
+def photo_to_video(photo_path, duration, output_path):
+    subprocess.run([
+        "ffmpeg", "-loop", "1", "-i", str(photo_path),
+        "-c:v", "libx264", "-t", str(duration),
+        "-vf", "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,format=yuv420p",
+        "-r", "30", str(output_path), "-y"
+    ], check=True, capture_output=True)
+
+def get_video_duration(video_path):
+    result = subprocess.run([
+        "ffprobe", "-v", "error", "-show_entries", "format=duration",
+        "-of", "default=noprint_wrappers=1:nokey=1", str(video_path)
+    ], capture_output=True, text=True)
+    try:
+        return float(result.stdout.strip())
+    except:
+        return 10.0
+
+def build_video_from_clips(clips, audio_path, audio_duration, output_path):
+    normalized = []
+    for i, clip in enumerate(clips):
+        norm = OUTPUT_DIR / f"norm_{i}.mp4"
+        subprocess.run([
+            "ffmpeg", "-i", str(clip),
+            "-vf", "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,format=yuv420p",
+            "-c:v", "libx264", "-r", "30", "-an",
+            str(norm), "-y"
+        ], check=True, capture_output=True)
+        normalized.append(norm)
+
+    list_file = OUTPUT_DIR / "clips_list.txt"
+    total = 0.0
+    loop_clips = []
+    while total < audio_duration:
+        for c in normalized:
+            d = get_video_duration(c)
+            loop_clips.append(c)
+            total += d
+            if total >= audio_duration:
+                break
+
+    with open(list_file, "w") as f:
+        for c in loop_clips:
+            f.write(f"file '{os.path.abspath(c)}'\n")
+
+    combined = OUTPUT_DIR / "combined_video.mp4"
+    subprocess.run([
+        "ffmpeg", "-f", "concat", "-safe", "0", "-i", str(list_file),
+        "-c:v", "libx264", "-t", str(audio_duration),
+        str(combined), "-y"
+    ], check=True, capture_output=True)
+
+    subprocess.run([
+        "ffmpeg", "-i", str(combined), "-i", str(audio_path),
+        "-map", "0:v", "-map", "1:a",
+        "-c:v", "copy", "-c:a", "aac", "-shortest",
+        str(output_path), "-y"
+    ], check=True, capture_output=True)
+
+    for n in normalized:
+        try:
+            os.remove(n)
+        except:
+            pass
+
+def create_video(article, audio_path, output_path):
+    send_telegram("Video olusturuluyor...")
+
+    audio_duration = get_audio_duration(audio_path)
+    title = article['title']
+
+    # Arama terimi oluştur
+    query = "Washington DC Congress politics"
+    if "trump" in title.lower():
+        query = "White House Washington politics"
+    elif "court" in title.lower() or "trial" in title.lower():
+        query = "courthouse justice law"
+    elif "senate" in title.lower() or "congress" in title.lower():
+        query = "US Capitol Congress"
+    elif "election" in title.lower():
+        query = "election voting America"
+
+    clips = []
+
+    # Pexels'dan video indir
+    video_urls = fetch_pexels_videos(query, count=5)
+    for i, url in enumerate(video_urls[:3]):
+        try:
+            path = OUTPUT_DIR / f"pexels_video_{i}.mp4"
+            download_file(url, path)
+            clips.append(path)
+        except:
+            pass
+
+    # Yeterli video yoksa fotoğraflardan video yap
+    if len(clips) < 3:
+        photo_urls = fetch_pexels_photos(query, count=8)
+        for i, url in enumerate(photo_urls[:6]):
+            try:
+                ext = "jpg"
+                photo_path = OUTPUT_DIR / f"pexels_photo_{i}.{ext}"
+                download_file(url, photo_path)
+                video_path = OUTPUT_DIR / f"photo_video_{i}.mp4"
+                photo_to_video(photo_path, 8, video_path)
+                clips.append(video_path)
+                os.remove(photo_path)
+            except:
+                pass
+
+    if clips:
+        build_video_from_clips(clips, audio_path, audio_duration, output_path)
+    else:
+        # Fallback: siyah ekran
+        subprocess.run([
+            "ffmpeg", "-f", "lavfi", "-i", "color=c=black:size=1920x1080:rate=30",
+            "-i", str(audio_path),
+            "-map", "0:v", "-map", "1:a",
+            "-c:v", "libx264", "-c:a", "aac", "-shortest",
+            str(output_path), "-y"
+        ], check=True)
+
+    # Geçici dosyaları temizle
+    for clip in clips:
+        try:
+            os.remove(clip)
+        except:
+            pass
 
 def generate_metadata(article):
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
@@ -162,14 +321,14 @@ def run(article):
         generate_audio(script, audio_path)
 
         final_video = OUTPUT_DIR / f"final_{timestamp}.mp4"
-        create_simple_video(audio_path, article['title'], final_video)
+        create_video(article, audio_path, final_video)
 
         metadata = generate_metadata(article)
         metadata_path = OUTPUT_DIR / f"metadata_{timestamp}.json"
         with open(metadata_path, "w") as f:
             json.dump(metadata, f, ensure_ascii=False, indent=2)
 
-        send_telegram (f"Video hazir! Baslik: {metadata['title']}\n\nYouTube yuklemesi basliyor...")
+        send_telegram(f"Video hazir! Baslik: {metadata['title']}\n\nYouTube yuklemesi basliyor...")
         import youtube_uploader
         youtube_uploader.upload(str(final_video), metadata)
 
