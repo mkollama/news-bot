@@ -319,14 +319,40 @@ def send_cover_suggestion(article, analysis):
     if main_person:
         cover_url = get_wikipedia_photo(main_person)
 
-    if cover_url:
-        send_telegram_photo(cover_url, f"Kapak fotografi onerisi: {main_person}\n\nYouTube'da manuel yukle!")
-    else:
+    if not cover_url:
         photos = fetch_pexels_photos(analysis.get("cover_query", "US Capitol"), count=1)
         if photos:
-            send_telegram_photo(photos[0], "Kapak fotografi onerisi (Pexels)\n\nYouTube'da manuel yukle!")
-        else:
-            send_telegram("Kapak fotografi bulunamadi, manuel ekle!")
+            cover_url = photos[0]
+
+    if cover_url:
+        try:
+            # Gorseli indir
+            img_path = OUTPUT_DIR / "cover_raw.jpg"
+            download_file(cover_url, img_path)
+
+            # 1280x720 formatina getir
+            cover_path = OUTPUT_DIR / "cover_1280x720.jpg"
+            subprocess.run([
+                "ffmpeg", "-i", str(img_path),
+                "-vf", "scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2:color=black",
+                str(cover_path), "-y"
+            ], check=True, capture_output=True)
+
+            os.remove(img_path)
+
+            # Telegram'a dosya olarak gonder
+            url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto"
+            with open(cover_path, "rb") as f:
+                requests.post(url, data={
+                    "chat_id": TELEGRAM_CHAT_ID,
+                    "caption": f"Kapak fotografi (1280x720 YouTube formati)\nKisi: {main_person}\n\nYouTube'da manuel yukle!"
+                }, files={"photo": f})
+
+            os.remove(cover_path)
+        except Exception as e:
+            send_telegram(f"Kapak fotografi hatasi: {str(e)}")
+    else:
+        send_telegram("Kapak fotografi bulunamadi, manuel ekle!")
 
 def generate_script(article, hook_title):
     send_telegram("Script yaziliyor...")
