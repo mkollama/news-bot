@@ -3,6 +3,7 @@ import requests
 import subprocess
 import os
 import json
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -20,15 +21,16 @@ def send_telegram(text):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     requests.post(url, json={"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "Markdown"})
 
-def send_telegram_photo(photo_url, caption):
+def send_telegram_photo_file(photo_path, caption):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto"
-    requests.post(url, json={"chat_id": TELEGRAM_CHAT_ID, "photo": photo_url, "caption": caption})
+    with open(photo_path, "rb") as f:
+        requests.post(url, data={"chat_id": TELEGRAM_CHAT_ID, "caption": caption}, files={"photo": f})
 
 def detect_people_and_topics(article):
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
     response = client.messages.create(
         model="claude-opus-4-20250514",
-        max_tokens=600,
+        max_tokens=800,
         messages=[{"role": "user", "content": f"""Analyze this news article. Return ONLY valid JSON.
 
 Title: {article['title']}
@@ -37,29 +39,39 @@ Summary: {article['summary']}
 Return exactly:
 {{
   "people": ["Person Name 1", "Person Name 2"],
-  "main_person": "Most important person",
-  "pexels_query": "stock footage search query (e.g. 'US Capitol Congress', 'White House Washington')",
-  "cspan_query": "C-SPAN YouTube search query for related footage",
-  "cover_query": "cover image search query"
-}}"""}]
+  "main_person": "Most important person in the story",
+  "youtube_queries": ["search query 1", "search query 2", "search query 3"],
+  "cspan_query": "C-SPAN specific search query",
+  "pexels_query": "fallback stock footage query"
+}}
+
+youtube_queries should be 3 different search terms to find related YouTube videos from last 12 hours.
+Example for Trump Iran news: ["Trump Iran statement", "Iran US war latest", "Trump cabinet Iran"]"""}]
     )
     try:
-        return json.loads(response.content[0].text.strip())
+        text = response.content[0].text.strip()
+        return json.loads(text)
     except:
-        return {"people": [], "main_person": "", "pexels_query": "Washington DC politics", "cspan_query": "Congress hearing", "cover_query": "US Capitol"}
+        return {
+            "people": [],
+            "main_person": "",
+            "youtube_queries": ["US politics news", "Congress hearing", "White House briefing"],
+            "cspan_query": "Congress hearing",
+            "pexels_query": "Washington DC politics"
+        }
 
 def generate_hook_title(article):
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
     response = client.messages.create(
         model="claude-opus-4-20250514",
-        max_tokens=200,
-        messages=[{"role": "user", "content": f"""Create a YouTube hook title for this news. Return ONLY the title, nothing else.
+        max_tokens=150,
+        messages=[{"role": "user", "content": f"""Create a YouTube hook title. Return ONLY the title, nothing else.
 
 Rules:
 - Max 70 characters
-- Must create curiosity or urgency
-- Use power words: EXPOSED, CAUGHT, BREAKING, SHOCKING, NOBODY EXPECTED
-- Do NOT use clickbait lies, stay factual
+- Create curiosity or urgency
+- Use power words: EXPOSED, CAUGHT, BREAKING, SHOCKING, NOBODY EXPECTED, JUST IN
+- Stay factual, no lies
 - Examples: "Trump CAUGHT Off Guard as Congress Drops Bombshell", "NOBODY Expected This Senate Vote"
 
 Article: {article['title']}
@@ -68,96 +80,103 @@ Hook title:"""}]
     )
     return response.content[0].text.strip().strip('"')
 
-def get_wikipedia_photo(person_name):
+def search_youtube_recent(query, max_results=3):
+    """Son 12 saatteki YouTube videolarini ara"""
     try:
-        params = {"action": "query", "titles": person_name, "prop": "pageimages", "format": "json", "pithumbsize": 800}
-        response = requests.get("https://en.wikipedia.org/w/api.php", params=params, timeout=10)
-        pages = response.json().get("query", {}).get("pages", {})
-        for page in pages.values():
-            thumb = page.get("thumbnail", {})
-            if thumb:
-                return thumb.get("source")
-    except:
-        pass
-    return None
+        result = subprocess.run([
+            "yt-dlp",
+            "--no-download",
+            "--print", "%(id)s\t%(title)s\t%(thumbnail)s\t%(duration)s",
+            "--playlist-end", str(max_results),
+            "--match-filter", "duration < 1800",  # 30 dakikadan kisa
+            f"https://www.youtube.com/results?search_query={query.replace(' ', '+')}&sp=EgIIAQ%3D%3D"  # son 1 saat filtresi
+        ], capture_output=True, text=True, timeout=60)
+
+        videos = []
+        for line in result.stdout.strip().split("\n"):
+            if not line.strip():
+                continue
+            parts = line.split("\t")
+            if len(parts) >= 3:
+                video_id = parts[0].strip()
+                title = parts[1].strip() if len(parts) > 1 else ""
+                thumbnail = parts[2].strip() if len(parts) > 2 else ""
+                if video_id and len(video_id) == 11:
+                    videos.append({
+                        "id": video_id,
+                        "title": title,
+                        "thumbnail": thumbnail,
+                        "url": f"https://www.youtube.com/watch?v={video_id}"
+                    })
+        return videos
+    except Exception as e:
+        print(f"YouTube arama hatasi: {e}")
+        return []
 
 def search_cspan_youtube(query):
+    """C-SPAN YouTube kanalinda ara"""
     try:
-        search_url = "https://www.youtube.com/results"
-        params = {"search_query": f"site:c-span.org OR C-SPAN {query}", "sp": "EgIIAQ%3D%3D"}
-        headers = {"User-Agent": "Mozilla/5.0"}
-        
-        # yt-dlp ile C-SPAN YouTube kanalinda ara
         result = subprocess.run([
             "yt-dlp",
             "--no-download",
             "--print", "%(id)s",
             "--playlist-end", "1",
             f"https://www.youtube.com/@CSPAN/search?query={query.replace(' ', '+')}"
-        ], capture_output=True, text=True, timeout=30)
-        
-        video_id = result.stdout.strip().split("\n")[0]
+        ], capture_output=True, text=True, timeout=45)
+
+        video_id = result.stdout.strip().split("\n")[0].strip()
         if video_id and len(video_id) == 11:
             return f"https://www.youtube.com/watch?v={video_id}"
-    except:
-        pass
+    except Exception as e:
+        print(f"C-SPAN arama hatasi: {e}")
     return None
 
-def download_cspan_clip(youtube_url, duration_seconds, output_path):
+def download_youtube_clip(youtube_url, start_seconds, duration_seconds, output_path):
+    """YouTube videosundan belirli bir kesit indir"""
     try:
-        # Once video indir
-        temp_path = OUTPUT_DIR / "cspan_temp.mp4"
+        temp_path = OUTPUT_DIR / f"yt_temp_{os.path.basename(output_path)}.mp4"
+        
         result = subprocess.run([
             "yt-dlp",
-            "-f", "best[height<=720]",
+            "-f", "best[height<=720][ext=mp4]/best[height<=720]/best",
             "--no-playlist",
             "-o", str(temp_path),
             youtube_url
         ], capture_output=True, text=True, timeout=120)
-        
+
         if result.returncode != 0 or not temp_path.exists():
+            print(f"Indirme basarisiz: {youtube_url}")
             return None
-        
-        # Ilk N saniyeyi kes
+
         subprocess.run([
-            "ffmpeg", "-i", str(temp_path),
+            "ffmpeg",
+            "-ss", str(start_seconds),
+            "-i", str(temp_path),
             "-t", str(duration_seconds),
             "-c:v", "libx264", "-c:a", "aac",
             str(output_path), "-y"
         ], check=True, capture_output=True)
-        
+
         os.remove(temp_path)
         return output_path
     except Exception as e:
-        print(f"C-SPAN indirme hatasi: {e}")
+        print(f"YouTube klip indirme hatasi: {e}")
+        if 'temp_path' in locals() and Path(temp_path).exists():
+            try: os.remove(temp_path)
+            except: pass
         return None
 
-def fetch_pexels_videos(query, count=5):
-    if not PEXELS_API_KEY:
-        return []
-    headers = {"Authorization": PEXELS_API_KEY}
-    response = requests.get("https://api.pexels.com/videos/search", headers=headers,
-        params={"query": query, "per_page": count, "min_duration": 5})
-    if response.status_code != 200:
-        return []
-    videos = response.json().get("videos", [])
-    result = []
-    for v in videos:
-        files = v.get("video_files", [])
-        hd = [f for f in files if f.get("quality") in ["hd", "sd"]]
-        if hd:
-            result.append(hd[0]["link"])
-    return result
-
-def fetch_pexels_photos(query, count=8):
-    if not PEXELS_API_KEY:
-        return []
-    headers = {"Authorization": PEXELS_API_KEY}
-    response = requests.get("https://api.pexels.com/v1/search", headers=headers,
-        params={"query": query, "per_page": count})
-    if response.status_code != 200:
-        return []
-    return [p["src"]["large"] for p in response.json().get("photos", [])]
+def download_thumbnail(url, output_path):
+    """YouTube thumbnail indir"""
+    try:
+        response = requests.get(url, timeout=15)
+        if response.status_code == 200:
+            with open(output_path, "wb") as f:
+                f.write(response.content)
+            return output_path
+    except:
+        pass
+    return None
 
 def download_file(url, output_path):
     response = requests.get(url, stream=True, timeout=30)
@@ -196,8 +215,14 @@ def build_final_video(clips, audio_path, audio_duration, output_path):
     normalized = []
     for i, clip in enumerate(clips):
         norm = OUTPUT_DIR / f"norm_{i}.mp4"
-        normalize_clip(clip, norm)
-        normalized.append(norm)
+        try:
+            normalize_clip(clip, norm)
+            normalized.append(norm)
+        except Exception as e:
+            print(f"Normalize hatasi {clip}: {e}")
+
+    if not normalized:
+        raise Exception("Hic clip normalize edilemedi")
 
     total = 0.0
     loop_clips = []
@@ -231,73 +256,95 @@ def build_final_video(clips, audio_path, audio_duration, output_path):
         try: os.remove(n)
         except: pass
 
-def create_video(article, audio_path, output_path, analysis):
+def fetch_pexels_videos(query, count=3):
+    if not PEXELS_API_KEY:
+        return []
+    headers = {"Authorization": PEXELS_API_KEY}
+    response = requests.get("https://api.pexels.com/videos/search", headers=headers,
+        params={"query": query, "per_page": count, "min_duration": 5})
+    if response.status_code != 200:
+        return []
+    videos = response.json().get("videos", [])
+    result = []
+    for v in videos:
+        files = v.get("video_files", [])
+        hd = [f for f in files if f.get("quality") in ["hd", "sd"]]
+        if hd:
+            result.append(hd[0]["link"])
+    return result
+
+def create_cover_image(thumbnail_path, hook_title, output_path):
+    """Thumbnail uzerine hook baslik ekle"""
+    try:
+        safe_title = hook_title[:50].replace("'", "").replace(":", "-").replace('"', '').replace("\\", "")
+        
+        subprocess.run([
+            "ffmpeg", "-i", str(thumbnail_path),
+            "-vf", (
+                "scale=1280:720:force_original_aspect_ratio=decrease,"
+                "pad=1280:720:(ow-iw)/2:(oh-ih)/2:color=black,"
+                f"drawtext=text='{safe_title}':"
+                "fontcolor=white:fontsize=52:x=(w-text_w)/2:y=h-120:"
+                "box=1:boxcolor=black@0.75:boxborderw=15:"
+                "font=DejaVuSans-Bold"
+            ),
+            str(output_path), "-y"
+        ], check=True, capture_output=True)
+        return output_path
+    except Exception as e:
+        print(f"Kapak olusturma hatasi: {e}")
+        # Basit resize
+        subprocess.run([
+            "ffmpeg", "-i", str(thumbnail_path),
+            "-vf", "scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2:color=black",
+            str(output_path), "-y"
+        ], check=True, capture_output=True)
+        return output_path
+
+def create_video(article, audio_path, output_path, analysis, youtube_videos):
     send_telegram("Video olusturuluyor...")
     audio_duration = get_clip_duration(audio_path)
     clips = []
 
-    # 1. C-SPAN'dan ilk 2-3 dakika (varsa)
+    # 1. C-SPAN'dan ilk 2-3 dakika
     cspan_query = analysis.get("cspan_query", "Congress hearing")
+    send_telegram(f"C-SPAN aranıyor: {cspan_query}")
     cspan_url = search_cspan_youtube(cspan_query)
     if cspan_url:
         cspan_clip = OUTPUT_DIR / "cspan_clip.mp4"
-        result = download_cspan_clip(cspan_url, 150, cspan_clip)  # 2.5 dakika
+        result = download_youtube_clip(cspan_url, 0, 150, cspan_clip)
         if result and cspan_clip.exists():
             clips.append(cspan_clip)
-            send_telegram(f"C-SPAN klibi alindi!")
-            print("C-SPAN klibi basariyla indirildi")
+            send_telegram("C-SPAN klibi alindi!")
 
-    # 2. Haberdeki kisilerin Wikipedia fotograflari
-    people = analysis.get("people", [])
-    for i, person in enumerate(people[:3]):
-        photo_url = get_wikipedia_photo(person)
-        if photo_url:
-            try:
-                photo_path = OUTPUT_DIR / f"person_{i}.jpg"
-                download_file(photo_url, photo_path)
-                video_path = OUTPUT_DIR / f"person_video_{i}.mp4"
-                photo_to_video(photo_path, 8, video_path)
-                clips.append(video_path)
-                os.remove(photo_path)
-                print(f"Wikipedia fotografi: {person}")
-            except Exception as e:
-                print(f"Wikipedia hatasi {person}: {e}")
+    # 2. Son 12 saatteki YouTube videolarindan kesitler
+    for i, video in enumerate(youtube_videos[:4]):
+        try:
+            clip_path = OUTPUT_DIR / f"yt_clip_{i}.mp4"
+            # Her videodan 20-30 saniye al
+            result = download_youtube_clip(video["url"], 10, 25, clip_path)
+            if result and clip_path.exists():
+                clips.append(clip_path)
+                print(f"YouTube klibi alindi: {video['title'][:50]}")
+        except Exception as e:
+            print(f"YouTube klip hatasi: {e}")
 
-    # 3. Pexels stock video (farkli sorgularla)
-    pexels_query = analysis.get("pexels_query", "Washington DC politics")
-    queries = [pexels_query, "US Congress Capitol", "White House Washington", "American politics news"]
-    
-    used_urls = set()
-    for q in queries:
-        if len(clips) >= 8:
-            break
-        video_urls = fetch_pexels_videos(q, count=3)
-        for url in video_urls:
-            if url not in used_urls:
-                try:
-                    path = OUTPUT_DIR / f"pexels_video_{len(clips)}.mp4"
-                    download_file(url, path)
-                    clips.append(path)
-                    used_urls.add(url)
-                except:
-                    pass
-
-    # 4. Pexels fotograf (yeterli video yoksa)
-    if len(clips) < 4:
-        for q in queries[:2]:
-            photo_urls = fetch_pexels_photos(q, count=5)
-            for i, url in enumerate(photo_urls):
-                if len(clips) >= 8:
-                    break
-                try:
-                    photo_path = OUTPUT_DIR / f"extra_photo_{len(clips)}.jpg"
-                    download_file(url, photo_path)
-                    video_path = OUTPUT_DIR / f"extra_video_{len(clips)}.mp4"
-                    photo_to_video(photo_path, 8, video_path)
-                    clips.append(video_path)
-                    os.remove(photo_path)
-                except:
-                    pass
+    # 3. Fallback: Pexels
+    if len(clips) < 3:
+        pexels_query = analysis.get("pexels_query", "Washington DC politics")
+        queries = [pexels_query, "US Congress Capitol", "White House Washington"]
+        used_urls = set()
+        for q in queries:
+            video_urls = fetch_pexels_videos(q, count=3)
+            for url in video_urls:
+                if url not in used_urls and len(clips) < 8:
+                    try:
+                        path = OUTPUT_DIR / f"pexels_{len(clips)}.mp4"
+                        download_file(url, path)
+                        clips.append(path)
+                        used_urls.add(url)
+                    except:
+                        pass
 
     if clips:
         build_final_video(clips, audio_path, audio_duration, output_path)
@@ -312,46 +359,31 @@ def create_video(article, audio_path, output_path, analysis):
         try: os.remove(clip)
         except: pass
 
-def send_cover_suggestion(article, analysis):
-    main_person = analysis.get("main_person", "")
-    cover_url = None
+def send_cover_to_telegram(youtube_videos, hook_title, analysis):
+    """En iyi thumbnail'i kapak olarak Telegram'a gonder"""
+    cover_sent = False
 
-    if main_person:
-        cover_url = get_wikipedia_photo(main_person)
+    # YouTube thumbnail'lerinden birini kullan
+    for video in youtube_videos[:3]:
+        if video.get("thumbnail"):
+            try:
+                thumb_path = OUTPUT_DIR / "cover_thumb.jpg"
+                result = download_thumbnail(video["thumbnail"], thumb_path)
+                if result:
+                    cover_path = OUTPUT_DIR / "cover_final.jpg"
+                    create_cover_image(thumb_path, hook_title, cover_path)
+                    send_telegram_photo_file(
+                        cover_path,
+                        f"Kapak fotografi onerisi (1280x720)\nBaslik: {hook_title}\n\nYouTube'da manuel yukle!"
+                    )
+                    os.remove(thumb_path)
+                    os.remove(cover_path)
+                    cover_sent = True
+                    break
+            except Exception as e:
+                print(f"Kapak hatasi: {e}")
 
-    if not cover_url:
-        photos = fetch_pexels_photos(analysis.get("cover_query", "US Capitol"), count=1)
-        if photos:
-            cover_url = photos[0]
-
-    if cover_url:
-        try:
-            # Gorseli indir
-            img_path = OUTPUT_DIR / "cover_raw.jpg"
-            download_file(cover_url, img_path)
-
-            # 1280x720 formatina getir
-            cover_path = OUTPUT_DIR / "cover_1280x720.jpg"
-            subprocess.run([
-                "ffmpeg", "-i", str(img_path),
-                "-vf", "scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2:color=black",
-                str(cover_path), "-y"
-            ], check=True, capture_output=True)
-
-            os.remove(img_path)
-
-            # Telegram'a dosya olarak gonder
-            url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto"
-            with open(cover_path, "rb") as f:
-                requests.post(url, data={
-                    "chat_id": TELEGRAM_CHAT_ID,
-                    "caption": f"Kapak fotografi (1280x720 YouTube formati)\nKisi: {main_person}\n\nYouTube'da manuel yukle!"
-                }, files={"photo": f})
-
-            os.remove(cover_path)
-        except Exception as e:
-            send_telegram(f"Kapak fotografi hatasi: {str(e)}")
-    else:
+    if not cover_sent:
         send_telegram("Kapak fotografi bulunamadi, manuel ekle!")
 
 def generate_script(article, hook_title):
@@ -371,9 +403,9 @@ Source: {article['source']}
 Write an engaging 6-10 minute video script (~800-1200 words).
 
 Structure:
-* Hook (30 sec): Start with the most shocking/surprising element. Create immediate tension.
+* Hook (30 sec): Start with the most shocking element. Create immediate tension.
 * Introduction (1 min): What happened and why it matters TODAY
-* Background (2 min): Context viewers need to understand
+* Background (2 min): Context viewers need
 * Main story (3-4 min): Full breakdown with details
 * Conclusion (30 sec): What happens next + subscribe CTA
 
@@ -450,41 +482,58 @@ def run(article):
     send_telegram(f"Video pipeline basladi!\n\n{article['title']}")
 
     try:
-        # Analiz
+        # 1. Analiz
         analysis = detect_people_and_topics(article)
         people = analysis.get("people", [])
         if people:
             send_telegram(f"Haberdeki kisiler: {', '.join(people)}")
 
-        # Hook baslik
+        # 2. Hook baslik
         hook_title = generate_hook_title(article)
         send_telegram(f"Hook baslik: *{hook_title}*")
 
-        # Script
+        # 3. YouTube'da son 12 saatte ilgili videolari ara
+        send_telegram("YouTube'da ilgili videolar aranıyor...")
+        youtube_queries = analysis.get("youtube_queries", ["US politics news"])
+        youtube_videos = []
+        seen_ids = set()
+        for query in youtube_queries:
+            videos = search_youtube_recent(query, max_results=3)
+            for v in videos:
+                if v["id"] not in seen_ids:
+                    youtube_videos.append(v)
+                    seen_ids.add(v["id"])
+        
+        if youtube_videos:
+            send_telegram(f"{len(youtube_videos)} YouTube videosu bulundu!")
+        else:
+            send_telegram("YouTube'da son 12 saatte video bulunamadi, Pexels kullanilacak.")
+
+        # 4. Script
         script = generate_script(article, hook_title)
         with open(OUTPUT_DIR / f"script_{timestamp}.txt", "w") as f:
             f.write(script)
 
-        # Ses
+        # 5. Ses
         audio_path = OUTPUT_DIR / f"audio_{timestamp}.mp3"
         generate_audio(script, audio_path)
 
-        # Video
+        # 6. Video
         final_video = OUTPUT_DIR / f"final_{timestamp}.mp4"
-        create_video(article, audio_path, final_video, analysis)
+        create_video(article, audio_path, final_video, analysis, youtube_videos)
 
-        # Metadata
+        # 7. Metadata
         metadata = generate_metadata(article, hook_title)
         with open(OUTPUT_DIR / f"metadata_{timestamp}.json", "w") as f:
             json.dump(metadata, f, ensure_ascii=False, indent=2)
 
-        # YouTube'a yukle
-        send_telegram(f"YouTube yuklemesi basliyor...")
+        # 8. YouTube'a yukle
+        send_telegram("YouTube yuklemesi basliyor...")
         import youtube_uploader
         youtube_uploader.upload(str(final_video), metadata)
 
-        # Kapak onerisi
-        send_cover_suggestion(article, analysis)
+        # 9. Kapak onerisi
+        send_cover_to_telegram(youtube_videos, hook_title, analysis)
 
     except Exception as e:
         error_msg = f"Pipeline hatasi: {str(e)}"
