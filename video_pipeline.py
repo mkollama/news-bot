@@ -577,13 +577,14 @@ Hook Title: {hook_title}
 Summary: {article['summary']}
 Source: {article['source']}
 
-Write an engaging 6-10 minute video script (~800-1200 words).
+Write an engaging 8-12 minute video script (~1100-1600 words).
 
 Structure:
 * Hook (30 sec): Start with most shocking element, create immediate tension
 * Introduction (1 min): What happened and why it matters TODAY
-* Background (2 min): Context viewers need
-* Main story (3-4 min): Full breakdown with details
+* Background (3 min): Deep context, history, key players
+* Main story (5-6 min): Full breakdown with details, quotes, reactions
+* Analysis (1 min): What this means going forward
 * Conclusion (30 sec): What happens next + subscribe CTA
 
 Rules:
