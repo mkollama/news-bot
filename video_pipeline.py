@@ -202,7 +202,7 @@ def search_youtube_recent(query, max_results=3):
             "--print", "%(id)s\t%(title)s\t%(thumbnail)s",
             "--playlist-end", str(max_results),
             "--match-filter", "duration < 1800",
-            f"https://www.youtube.com/results?search_query={query.replace(' ', '+')}&sp=EgIYAQ%3D%3D"
+            f"https://www.youtube.com/results?search_query={query.replace(' ', '+')}&sp=EgIYAQ%3D%3D
         ], capture_output=True, text=True, timeout=60)
 
         videos = []
