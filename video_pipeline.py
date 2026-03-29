@@ -461,18 +461,7 @@ def create_video(article, audio_path, output_path, analysis, youtube_videos):
     video_clips = []
     photo_clips = []
 
-    # 1. C-SPAN klip
-    cspan_query = analysis.get("cspan_query", "Congress hearing")
-    send_telegram("C-SPAN aranıyor...")
-    cspan_url = search_cspan_youtube(cspan_query)
-    if cspan_url:
-        cspan_clip = OUTPUT_DIR / "cspan_clip.mp4"
-        result = download_youtube_clip(cspan_url, 0, 180, cspan_clip)
-        if result and cspan_clip.exists():
-            video_clips.append(cspan_clip)
-            send_telegram("C-SPAN klibi alindi!")
-
-    # 2. YouTube son 12 saat klipleri
+       # 2. YouTube son 12 saat klipleri
     for i, video in enumerate(youtube_videos[:3]):
         try:
             clip_path = OUTPUT_DIR / f"yt_clip_{i}.mp4"
