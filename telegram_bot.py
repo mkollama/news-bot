@@ -53,10 +53,11 @@ def trigger_news_fetch():
 
 def trigger_video_pipeline(article):
     send_message(f"✅ Anladım! Şu haber için video yapılıyor:\n\n*{article['title']}*\n\n⏳ Pipeline başlıyor...")
-    import threading
-    import video_pipeline
-    thread = threading.Thread(target=video_pipeline.run, args=(article,), daemon=True)
-    thread.start()
+    try:
+        import video_pipeline
+        video_pipeline.run(article)
+    except Exception as e:
+        send_message(f"❌ Pipeline hatası: {str(e)}")
 
 def process_message(text, articles):
     text = text.strip()
