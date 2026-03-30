@@ -18,12 +18,18 @@ OUTPUT_DIR.mkdir(exist_ok=True)
 
 def send_telegram(text):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    requests.post(url, json={"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "Markdown"})
+    try:
+        requests.post(url, json={"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "Markdown"}, timeout=10)
+    except:
+        pass
 
 def send_telegram_photo_file(photo_path, caption):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto"
-    with open(photo_path, "rb") as f:
-        requests.post(url, data={"chat_id": TELEGRAM_CHAT_ID, "caption": caption}, files={"photo": f})
+    try:
+        with open(photo_path, "rb") as f:
+            requests.post(url, data={"chat_id": TELEGRAM_CHAT_ID, "caption": caption}, files={"photo": f}, timeout=30)
+    except:
+        pass
 
 def detect_people_and_topics(article):
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
@@ -40,22 +46,18 @@ Return exactly:
   "people": ["Person Name 1", "Person Name 2"],
   "main_person": "Most important person in the story",
   "youtube_queries": ["search query 1", "search query 2", "search query 3"],
-  "cspan_query": "C-SPAN specific search query",
   "pexels_query": "fallback stock footage query"
 }}
 
-youtube_queries: 3 different search terms to find related YouTube videos from last 12 hours.
-Example for Trump Iran news: ["Trump Iran statement", "Iran US war latest", "Trump cabinet Iran"]"""}]
+youtube_queries: 3 different search terms matching the article title to find related YouTube videos."""}]
     )
     try:
-        text = response.content[0].text.strip()
-        return json.loads(text)
+        return json.loads(response.content[0].text.strip())
     except:
         return {
             "people": [],
             "main_person": "",
             "youtube_queries": ["US politics news", "Congress hearing", "White House briefing"],
-            "cspan_query": "Congress hearing",
             "pexels_query": "Washington DC politics"
         }
 
@@ -71,128 +73,12 @@ Rules:
 - Create curiosity or urgency
 - Use power words: EXPOSED, CAUGHT, BREAKING, SHOCKING, JUST IN
 - Stay factual, no lies
-- Examples: "Trump CAUGHT Off Guard as Congress Acts", "BREAKING: Senate Makes Midnight Move"
 
 Article: {article['title']}
 
 Hook title:"""}]
     )
     return response.content[0].text.strip().strip('"')
-
-def get_text_coverage(image_path):
-    """OCR ile fotograftaki yazi yogunlugunu olc"""
-    try:
-        import pytesseract
-        from PIL import Image
-        from pytesseract import Output
-
-        img = Image.open(image_path)
-        width, height = img.size
-
-        data = pytesseract.image_to_data(img, output_type=Output.DICT)
-        text_rows = []
-        for i, text in enumerate(data['text']):
-            if text.strip() and int(data['conf'][i]) > 30:
-                y = data['top'][i]
-                h = data['height'][i]
-                text_rows.append(y + h)
-
-        if text_rows:
-            max_text_y = max(text_rows)
-            return max_text_y / height
-        return 0.0
-    except Exception as e:
-        print(f"OCR hatasi: {e}")
-        return 0.5
-
-def create_cover_image(thumbnail_path, hook_title, output_path):
-    """
-    - OCR ile yazilarin nerede oldugunu tespit et
-    - Yazilari kirp
-    - Hook basligini dinamik font ile tam sigdir
-    """
-    try:
-        # OCR ile yazi kapsamini bul
-        coverage = get_text_coverage(thumbnail_path)
-        print(f"Yazi kaplaması: %{coverage*100:.0f}")
-
-        # Crop oranini belirle
-        if coverage > 0.75:
-            crop_ratio = 0.70
-        elif coverage > 0.55:
-            crop_ratio = 0.80
-        elif coverage > 0.35:
-            crop_ratio = 0.88
-        else:
-            crop_ratio = 0.95
-
-        # Font boyutunu dinamik hesapla - 1220px genislige sigdir
-        safe_title = hook_title.replace("'", "").replace(":", " -").replace('"', '').replace("\\", "")
-        max_width = 1220
-        char_count = len(safe_title)
-        font_size = 72
-        while font_size > 22:
-            estimated_width = char_count * font_size * 0.58
-            if estimated_width <= max_width:
-                break
-            font_size -= 2
-
-        print(f"Font boyutu: {font_size}")
-
-        vf = (
-            f"crop=in_w:in_h*{crop_ratio}:0:0,"
-            "scale=1280:720:force_original_aspect_ratio=decrease,"
-            "pad=1280:720:(ow-iw)/2:(oh-ih)/2:color=black,"
-            f"drawtext=text='{safe_title}':fontcolor=white:fontsize={font_size}:"
-            "x=(w-text_w)/2:y=(h-text_h-20):"
-            "box=1:boxcolor=black@0.85:boxborderw=14:font=DejaVuSans-Bold"
-        )
-
-        subprocess.run([
-            "ffmpeg", "-i", str(thumbnail_path),
-            "-vf", vf,
-            "-frames:v", "1", "-update", "1",
-            str(output_path), "-y"
-        ], check=True, capture_output=True)
-
-        return output_path
-
-    except Exception as e:
-        print(f"Kapak olusturma hatasi: {e}")
-        # Fallback: sadece resize
-        safe_title = hook_title.replace("'", "").replace(":", " -").replace('"', '').replace("\\", "")
-        char_count = len(safe_title)
-        font_size = 72
-        while font_size > 22:
-            if char_count * font_size * 0.58 <= 1220:
-                break
-            font_size -= 2
-
-        subprocess.run([
-            "ffmpeg", "-i", str(thumbnail_path),
-            "-vf", (
-                "scale=1280:720:force_original_aspect_ratio=decrease,"
-                "pad=1280:720:(ow-iw)/2:(oh-ih)/2:color=black,"
-                f"drawtext=text='{safe_title}':fontcolor=white:fontsize={font_size}:"
-                "x=(w-text_w)/2:y=(h-text_h-20):"
-                "box=1:boxcolor=black@0.85:boxborderw=14:font=DejaVuSans-Bold"
-            ),
-            "-frames:v", "1", "-update", "1",
-            str(output_path), "-y"
-        ], check=True, capture_output=True)
-        return output_path
-
-def get_thumbnail_text_score(image_path):
-    """Daha az yazi = daha iyi thumbnail. Dusuk skor = iyi."""
-    try:
-        import pytesseract
-        from PIL import Image
-        img = Image.open(image_path)
-        text = pytesseract.image_to_string(img)
-        word_count = len(text.split())
-        return word_count
-    except:
-        return 999
 
 def search_youtube_recent(query, max_results=3):
     try:
@@ -202,7 +88,7 @@ def search_youtube_recent(query, max_results=3):
             "--print", "%(id)s\t%(title)s\t%(thumbnail)s",
             "--playlist-end", str(max_results),
             "--match-filter", "duration < 1800",
-            f"https://www.youtube.com/results?search_query={query.replace(' ', '+')}&sp=EgIYAQ%3D%3D
+            f"https://www.youtube.com/results?search_query={query.replace(' ', '+')}&sp=EgIYAQ%3D%3D"
         ], capture_output=True, text=True, timeout=60)
 
         videos = []
@@ -226,27 +112,9 @@ def search_youtube_recent(query, max_results=3):
         print(f"YouTube arama hatasi: {e}")
         return []
 
-def search_cspan_youtube(query):
-    try:
-        result = subprocess.run([
-            "yt-dlp",
-            "--no-download",
-            "--print", "%(id)s",
-            "--playlist-end", "1",
-            f"https://www.youtube.com/@CSPAN/search?query={query.replace(' ', '+')}"
-        ], capture_output=True, text=True, timeout=45)
-
-        video_id = result.stdout.strip().split("\n")[0].strip()
-        if video_id and len(video_id) == 11:
-            return f"https://www.youtube.com/watch?v={video_id}"
-    except Exception as e:
-        print(f"C-SPAN arama hatasi: {e}")
-    return None
-
 def download_youtube_clip(youtube_url, start_seconds, duration_seconds, output_path):
     try:
         temp_path = OUTPUT_DIR / f"yt_temp_{os.path.basename(str(output_path))}.mp4"
-
         result = subprocess.run([
             "yt-dlp",
             "-f", "best[height<=720][ext=mp4]/best[height<=720]/best",
@@ -271,7 +139,7 @@ def download_youtube_clip(youtube_url, start_seconds, duration_seconds, output_p
         os.remove(temp_path)
         return output_path
     except Exception as e:
-        print(f"YouTube klip indirme hatasi: {e}")
+        print(f"YouTube klip hatasi: {e}")
         try:
             if Path(str(temp_path)).exists():
                 os.remove(temp_path)
@@ -354,7 +222,6 @@ def build_final_video(video_clips, photo_clips, audio_path, audio_duration, outp
     all_clips = []
 
     # Video kismi - ilk 3 dakika
-    video_section = OUTPUT_DIR / "video_section.mp4"
     if video_clips:
         norm_videos = []
         for i, clip in enumerate(video_clips):
@@ -366,31 +233,22 @@ def build_final_video(video_clips, photo_clips, audio_path, audio_duration, outp
                 print(f"Video normalize hatasi: {e}")
 
         if norm_videos:
+            video_section = OUTPUT_DIR / "video_section.mp4"
             list_file = OUTPUT_DIR / "video_list.txt"
             with open(list_file, "w") as f:
                 for n in norm_videos:
                     f.write(f"file '{os.path.abspath(n)}'\n")
-
             subprocess.run([
                 "ffmpeg", "-f", "concat", "-safe", "0", "-i", str(list_file),
                 "-c:v", "libx264", "-t", "180", "-an",
                 str(video_section), "-y"
             ], check=True, capture_output=True)
-
             for n in norm_videos:
                 try: os.remove(n)
                 except: pass
-
             all_clips.append(video_section)
-    
-    if not all_clips:
-        subprocess.run([
-            "ffmpeg", "-f", "lavfi", "-i", "color=c=navy:size=1920x1080:rate=30",
-            "-t", "5", "-c:v", "libx264", str(video_section), "-y"
-        ], check=True, capture_output=True)
-        all_clips.append(video_section)
 
-    # Fotograf kismi - geri kalan sure
+    # Fotograf kismi
     photo_duration = max(audio_duration - 180, 30)
     if photo_clips:
         norm_photos = []
@@ -424,12 +282,21 @@ def build_final_video(video_clips, photo_clips, audio_path, audio_duration, outp
                 "-c:v", "libx264", "-t", str(photo_duration), "-an",
                 str(photo_section), "-y"
             ], check=True, capture_output=True)
-
             all_clips.append(photo_section)
 
             for n in norm_photos:
                 try: os.remove(n)
                 except: pass
+
+    if not all_clips:
+        # Fallback siyah ekran
+        fallback = OUTPUT_DIR / "fallback.mp4"
+        subprocess.run([
+            "ffmpeg", "-f", "lavfi", "-i", "color=c=black:size=1920x1080:rate=30",
+            "-t", str(audio_duration), "-c:v", "libx264",
+            str(fallback), "-y"
+        ], check=True, capture_output=True)
+        all_clips.append(fallback)
 
     # Birlestir
     final_list = OUTPUT_DIR / "final_list.txt"
@@ -455,23 +322,90 @@ def build_final_video(video_clips, photo_clips, audio_path, audio_duration, outp
         try: os.remove(c)
         except: pass
 
+def get_thumbnail_text_score(image_path):
+    try:
+        import pytesseract
+        from PIL import Image
+        img = Image.open(image_path)
+        text = pytesseract.image_to_string(img)
+        return len(text.split())
+    except:
+        return 999
+
+def create_cover_image(thumbnail_path, hook_title, output_path):
+    try:
+        coverage = 0.5
+        try:
+            import pytesseract
+            from PIL import Image
+            from pytesseract import Output
+            img = Image.open(thumbnail_path)
+            width, height = img.size
+            data = pytesseract.image_to_data(img, output_type=Output.DICT)
+            text_rows = []
+            for i, text in enumerate(data['text']):
+                if text.strip() and int(data['conf'][i]) > 30:
+                    y = data['top'][i]
+                    h = data['height'][i]
+                    text_rows.append(y + h)
+            if text_rows:
+                coverage = max(text_rows) / height
+        except:
+            pass
+
+        if coverage > 0.75:
+            crop_ratio = 0.70
+        elif coverage > 0.55:
+            crop_ratio = 0.80
+        elif coverage > 0.35:
+            crop_ratio = 0.88
+        else:
+            crop_ratio = 0.95
+
+        safe_title = hook_title.replace("'", "").replace(":", " -").replace('"', '').replace("\\", "")
+        char_count = len(safe_title)
+        font_size = 72
+        while font_size > 22:
+            if char_count * font_size * 0.58 <= 1220:
+                break
+            font_size -= 2
+
+        subprocess.run([
+            "ffmpeg", "-i", str(thumbnail_path),
+            "-vf", (
+                f"crop=in_w:in_h*{crop_ratio}:0:0,"
+                "scale=1280:720:force_original_aspect_ratio=decrease,"
+                "pad=1280:720:(ow-iw)/2:(oh-ih)/2:color=black,"
+                f"drawtext=text='{safe_title}':fontcolor=white:fontsize={font_size}:"
+                "x=(w-text_w)/2:y=(h-text_h-20):"
+                "box=1:boxcolor=black@0.85:boxborderw=14:font=DejaVuSans-Bold"
+            ),
+            "-frames:v", "1", "-update", "1",
+            str(output_path), "-y"
+        ], check=True, capture_output=True)
+        return output_path
+    except Exception as e:
+        print(f"Kapak hatasi: {e}")
+        return None
+
 def create_video(article, audio_path, output_path, analysis, youtube_videos):
     send_telegram("Video olusturuluyor...")
     audio_duration = get_clip_duration(audio_path)
     video_clips = []
     photo_clips = []
 
-       # 2. YouTube son 12 saat klipleri
-    for i, video in enumerate(youtube_videos[:3]):
+    # YouTube son 24 saat klipleri (baslikla eslesenleri)
+    for i, video in enumerate(youtube_videos[:4]):
         try:
             clip_path = OUTPUT_DIR / f"yt_clip_{i}.mp4"
             result = download_youtube_clip(video["url"], 10, 30, clip_path)
             if result and clip_path.exists():
                 video_clips.append(clip_path)
+                print(f"YouTube klibi alindi: {video['title'][:50]}")
         except Exception as e:
             print(f"YouTube klip hatasi: {e}")
 
-    # 3. Pexels fotograflar (fotograf bolumu icin)
+    # Pexels fotograflar
     pexels_query = analysis.get("pexels_query", "Washington DC politics")
     queries = [pexels_query, "US Congress Capitol building", "White House Washington DC", "American politics government"]
     used_urls = set()
@@ -512,12 +446,10 @@ def create_video(article, audio_path, output_path, analysis, youtube_videos):
         except: pass
 
 def send_cover_to_telegram(youtube_videos, hook_title):
-    """En az yazili thumbnail'i sec, OCR ile kirp, hook baslik ekle"""
     best_thumb = None
     best_score = 999
     thumb_paths = []
 
-    # Tum thumbnail'leri indir ve skor hesapla
     for i, video in enumerate(youtube_videos[:5]):
         if video.get("thumbnail"):
             try:
@@ -525,30 +457,29 @@ def send_cover_to_telegram(youtube_videos, hook_title):
                 result = download_thumbnail(video["thumbnail"], thumb_path)
                 if result:
                     score = get_thumbnail_text_score(thumb_path)
-                    thumb_paths.append((thumb_path, score))
-                    print(f"Thumbnail {i} skoru: {score}")
+                    thumb_paths.append(thumb_path)
                     if score < best_score:
                         best_score = score
                         best_thumb = thumb_path
             except Exception as e:
-                print(f"Thumbnail indirme hatasi: {e}")
+                print(f"Thumbnail hatasi: {e}")
 
     if best_thumb:
         try:
             cover_path = OUTPUT_DIR / "cover_final.jpg"
-            create_cover_image(best_thumb, hook_title, cover_path)
-            send_telegram_photo_file(
-                cover_path,
-                f"Kapak fotografi (1280x720)\nBaslik: {hook_title}\n\nYouTube'da manuel yukle!"
-            )
-            os.remove(cover_path)
+            result = create_cover_image(best_thumb, hook_title, cover_path)
+            if result:
+                send_telegram_photo_file(
+                    cover_path,
+                    f"Kapak fotografi (1280x720)\nBaslik: {hook_title}\n\nYouTube'da manuel yukle!"
+                )
+                try: os.remove(cover_path)
+                except: pass
         except Exception as e:
-            send_telegram(f"Kapak olusturma hatasi: {e}")
-    else:
-        send_telegram("Kapak fotografi bulunamadi, manuel ekle!")
+            print(f"Kapak olusturma hatasi: {e}")
+            send_telegram("Kapak fotografi olusturulamadi, manuel ekle!")
 
-    # Gecici dosyalari temizle
-    for tp, _ in thumb_paths:
+    for tp in thumb_paths:
         try: os.remove(tp)
         except: pass
 
@@ -653,6 +584,7 @@ def run(article):
 
     try:
         # 1. Analiz
+        send_telegram("Haber analiz ediliyor...")
         analysis = detect_people_and_topics(article)
         people = analysis.get("people", [])
         if people:
@@ -662,7 +594,7 @@ def run(article):
         hook_title = generate_hook_title(article)
         send_telegram(f"Hook baslik: *{hook_title}*")
 
-        # 3. YouTube son 12 saat arama
+        # 3. YouTube arama - baslikla eslesenleri bul
         send_telegram("YouTube'da ilgili videolar aranıyor...")
         youtube_queries = analysis.get("youtube_queries", ["US politics news"])
         youtube_videos = []
@@ -688,7 +620,7 @@ def run(article):
         audio_path = OUTPUT_DIR / f"audio_{timestamp}.mp3"
         generate_audio(script, audio_path)
 
-        # 6. Video (ilk 3 dk video, sonrasi fotograf)
+        # 6. Video
         final_video = OUTPUT_DIR / f"final_{timestamp}.mp4"
         create_video(article, audio_path, final_video, analysis, youtube_videos)
 
@@ -702,13 +634,14 @@ def run(article):
         import youtube_uploader
         youtube_uploader.upload(str(final_video), metadata)
 
-        # 9. Kapak onerisi - OCR ile en temiz thumbnail sec
+        # 9. Kapak onerisi
         send_cover_to_telegram(youtube_videos, hook_title)
 
     except Exception as e:
-        error_msg = f"Pipeline hatasi: {str(e)}"
+        import traceback
+        error_msg = f"Pipeline hatasi: {str(e)}\n{traceback.format_exc()[-500:]}"
         print(error_msg)
-        send_telegram(error_msg)
+        send_telegram(f"Pipeline hatasi: {str(e)}")
 
 if __name__ == "__main__":
     import sys
