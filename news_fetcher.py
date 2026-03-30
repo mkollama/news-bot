@@ -104,6 +104,7 @@ def fetch_news():
     return all_articles
 
 def filter_with_claude(articles):
+    import time
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
     
     articles_text = "\n\n".join([
@@ -111,12 +112,14 @@ def filter_with_claude(articles):
         for i, a in enumerate(articles)
     ])
     
-    response = client.messages.create(
-        model="claude-opus-4-20250514",
-        max_tokens=1000,
-        messages=[{
-            "role": "user",
-            "content": f"""Sen bir YouTube haber kanali editorusun. ABD siyaseti, Trump, Kongre, mahkeme davalari konularinda video yapiyoruz.
+    for attempt in range(5):
+        try:
+            response = client.messages.create(
+                model="claude-opus-4-20250514",
+                max_tokens=1000,
+                messages=[{
+                    "role": "user",
+                    "content": f"""Sen bir YouTube haber kanali editorusun. ABD siyaseti, Trump, Kongre, mahkeme davalari konularinda video yapiyoruz.
 
 Asagidaki haberlerden YouTube videosu icin EN ILGINC ve EN COK IZLENECEK 3-5 tanesini sec.
 
@@ -134,8 +137,20 @@ HABERLER:
 {articles_text}
 
 Sadece JSON don, baska bir sey yazma."""
-        }]
-    )
+                }]
+            )
+            result = json.loads(response.content[0].text.strip())
+            selected_ids = result.get("selected", [])
+            return [articles[i] for i in selected_ids if i < len(articles)]
+        except Exception as e:
+            if "overloaded" in str(e).lower() and attempt < 4:
+                wait = (attempt + 1) * 30
+                print(f"API overloaded, {wait} saniye bekleniyor...")
+                time.sleep(wait)
+            else:
+                print(f"Claude hatasi: {e}")
+                return articles[:5]
+    return articles[:5]
     
     try:
         result = json.loads(response.content[0].text.strip())
