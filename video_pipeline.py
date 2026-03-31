@@ -212,6 +212,23 @@ def get_wikipedia_photo(person_name):
     except:
         pass
     return None
+
+def search_cspan_youtube(query):
+    try:
+        result = subprocess.run([
+            "yt-dlp",
+            "--no-download",
+            "--print", "%(id)s",
+            "--playlist-end", "1",
+            f"https://www.youtube.com/@CSPAN/search?query={query.replace(' ', '+')}"
+        ], capture_output=True, text=True, timeout=45)
+        video_id = result.stdout.strip().split("\n")[0].strip()
+        if video_id and len(video_id) == 11:
+            return f"https://www.youtube.com/watch?v={video_id}"
+    except Exception as e:
+        print(f"C-SPAN arama hatasi: {e}")
+    return None
+    
 def fetch_pexels_photos(query, count=8):
     if not PEXELS_API_KEY:
         return []
@@ -413,6 +430,18 @@ def create_video(article, audio_path, output_path, analysis, youtube_videos):
     send_telegram("Video olusturuluyor...")
     audio_duration = get_clip_duration(audio_path)
     video_clips = []
+    # C-SPAN - kisi adi + konu ile ara
+people = analysis.get("people", [])
+cspan_query = people[0] if people else analysis.get("pexels_query", "Congress")
+send_telegram(f"C-SPAN aranıyor: {cspan_query}")
+cspan_url = search_cspan_youtube(cspan_query)
+if cspan_url:
+    cspan_clip = OUTPUT_DIR / "cspan_clip.mp4"
+    result = download_youtube_clip(cspan_url, 0, 150, cspan_clip)
+    if result and cspan_clip.exists():
+        video_clips.append(cspan_clip)
+        send_telegram("C-SPAN klibi alindi!")
+        
     photo_clips = []
 
     # YouTube son 24 saat klipleri (baslikla eslesenleri)
