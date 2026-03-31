@@ -430,21 +430,21 @@ def create_video(article, audio_path, output_path, analysis, youtube_videos):
     send_telegram("Video olusturuluyor...")
     audio_duration = get_clip_duration(audio_path)
     video_clips = []
-    # C-SPAN - kisi adi + konu ile ara
-people = analysis.get("people", [])
-cspan_query = people[0] if people else analysis.get("pexels_query", "Congress")
-send_telegram(f"C-SPAN aranıyor: {cspan_query}")
-cspan_url = search_cspan_youtube(cspan_query)
-if cspan_url:
-    cspan_clip = OUTPUT_DIR / "cspan_clip.mp4"
-    result = download_youtube_clip(cspan_url, 0, 150, cspan_clip)
-    if result and cspan_clip.exists():
-        video_clips.append(cspan_clip)
-        send_telegram("C-SPAN klibi alindi!")
-        
     photo_clips = []
 
-    # YouTube son 24 saat klipleri (baslikla eslesenleri)
+    # C-SPAN - kisi adi + konu ile ara
+    people = analysis.get("people", [])
+    cspan_query = people[0] if people else analysis.get("pexels_query", "Congress")
+    send_telegram(f"C-SPAN aranıyor: {cspan_query}")
+    cspan_url = search_cspan_youtube(cspan_query)
+    if cspan_url:
+        cspan_clip = OUTPUT_DIR / "cspan_clip.mp4"
+        result = download_youtube_clip(cspan_url, 0, 150, cspan_clip)
+        if result and cspan_clip.exists():
+            video_clips.append(cspan_clip)
+            send_telegram("C-SPAN klibi alindi!")
+
+    # YouTube son 24 saat klipleri
     for i, video in enumerate(youtube_videos[:4]):
         try:
             clip_path = OUTPUT_DIR / f"yt_clip_{i}.mp4"
@@ -454,21 +454,22 @@ if cspan_url:
                 print(f"YouTube klibi alindi: {video['title'][:50]}")
         except Exception as e:
             print(f"YouTube klip hatasi: {e}")
-# Haberdeki kisilerin Wikipedia fotograflari
-people = analysis.get("people", [])
-for i, person in enumerate(people[:3]):
-    photo_url = get_wikipedia_photo(person)
-    if photo_url:
-        try:
-            photo_path = OUTPUT_DIR / f"person_{i}.jpg"
-            download_file(photo_url, photo_path)
-            video_path = OUTPUT_DIR / f"person_video_{i}.mp4"
-            photo_to_video(photo_path, 8, video_path)
-            photo_clips.append(video_path)
-            os.remove(photo_path)
-            print(f"Wikipedia fotografi alindi: {person}")
-        except Exception as e:
-            print(f"Wikipedia hatasi {person}: {e}")
+
+    # Haberdeki kisilerin Wikipedia fotograflari
+    people = analysis.get("people", [])
+    for i, person in enumerate(people[:3]):
+        photo_url = get_wikipedia_photo(person)
+        if photo_url:
+            try:
+                photo_path = OUTPUT_DIR / f"person_{i}.jpg"
+                download_file(photo_url, photo_path)
+                video_path = OUTPUT_DIR / f"person_video_{i}.mp4"
+                photo_to_video(photo_path, 8, video_path)
+                photo_clips.append(video_path)
+                os.remove(photo_path)
+                print(f"Wikipedia fotografi alindi: {person}")
+            except Exception as e:
+                print(f"Wikipedia hatasi {person}: {e}")
 
     # Pexels fotograflar
     pexels_query = analysis.get("pexels_query", "Washington DC politics")
