@@ -191,6 +191,27 @@ def normalize_clip(input_path, output_path):
         str(output_path), "-y"
     ], check=True, capture_output=True)
 
+def get_wikipedia_photo(person_name):
+    try:
+        params = {
+            "action": "query",
+            "titles": person_name,
+            "prop": "pageimages",
+            "format": "json",
+            "pithumbsize": 800
+        }
+        response = requests.get(
+            "https://en.wikipedia.org/w/api.php",
+            params=params, timeout=10
+        )
+        pages = response.json().get("query", {}).get("pages", {})
+        for page in pages.values():
+            thumb = page.get("thumbnail", {})
+            if thumb:
+                return thumb.get("source")
+    except:
+        pass
+    return None
 def fetch_pexels_photos(query, count=8):
     if not PEXELS_API_KEY:
         return []
@@ -404,6 +425,21 @@ def create_video(article, audio_path, output_path, analysis, youtube_videos):
                 print(f"YouTube klibi alindi: {video['title'][:50]}")
         except Exception as e:
             print(f"YouTube klip hatasi: {e}")
+# Haberdeki kisilerin Wikipedia fotograflari
+people = analysis.get("people", [])
+for i, person in enumerate(people[:3]):
+    photo_url = get_wikipedia_photo(person)
+    if photo_url:
+        try:
+            photo_path = OUTPUT_DIR / f"person_{i}.jpg"
+            download_file(photo_url, photo_path)
+            video_path = OUTPUT_DIR / f"person_video_{i}.mp4"
+            photo_to_video(photo_path, 8, video_path)
+            photo_clips.append(video_path)
+            os.remove(photo_path)
+            print(f"Wikipedia fotografi alindi: {person}")
+        except Exception as e:
+            print(f"Wikipedia hatasi {person}: {e}")
 
     # Pexels fotograflar
     pexels_query = analysis.get("pexels_query", "Washington DC politics")
