@@ -12,7 +12,7 @@ TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 PEXELS_API_KEY = os.environ.get("PEXELS_API_KEY")
 
-VOICE_ID = "21m00Tcm4TlvDq8ikWAM"
+VOICE_ID = "mUfWEBhcigm8YlCDbmGP"
 OUTPUT_DIR = Path("output_videos")
 OUTPUT_DIR.mkdir(exist_ok=True)
 
