@@ -66,14 +66,24 @@ def process_message(text, articles):
         trigger_news_fetch()
         return
 
-    if text.lower() == "/yardim":
-        send_message(
-            "🤖 *Komutlar:*\n\n"
-            "/haber → Haberleri şimdi tara\n"
-            "/yardim → Bu menüyü göster\n\n"
-            "Haber listesi gelince numara yaz (1, 2, 3...)\n"
-            "Hiçbirini istemiyorsan *0* yaz"
-        )
+   if text.lower().startswith("/kapak"):
+        parts = text.split("|")
+        if len(parts) < 2:
+            send_message("Kullanim:\n/kapak BASLIK | ANA KISI | KISI2\n\nOrnek:\n/kapak Pope DESTROYS Trump | Pope Leo XIV | Donald Trump")
+            return
+        hook_title = parts[0].replace("/kapak", "").strip()
+        people = [p.strip() for p in parts[1:]]
+        analysis = {
+            "main_person": people[0] if people else "",
+            "people": people,
+            "drama_type": "",
+            "article_title": hook_title
+        }
+        send_message(f"Kapak olusturuluyor...\nBaslik: {hook_title}\nKisiler: {', '.join(people)}")
+        import subprocess
+        import json
+        env_data = json.dumps({"hook_title": hook_title, "analysis": analysis})
+        subprocess.Popen(["python", "make_cover.py", env_data])
         return
 
     elif text == "/kapak":
