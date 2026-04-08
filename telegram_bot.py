@@ -76,6 +76,11 @@ def process_message(text, articles):
         )
         return
 
+    elif text == "/kapak":
+    send_message("Kapak yeniden olusturuluyor...")
+    import subprocess
+    subprocess.Popen(["python", "make_cover.py"])
+
     if text == "0":
         send_message("👍 Tamam, bu haberleri geçtik. /haber yazarak yeni tarama başlatabilirsin.")
         try:
