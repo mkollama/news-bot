@@ -41,17 +41,22 @@ def detect_people_and_topics(article):
 Title: {article['title']}
 Summary: {article['summary']}
 
+video_search_queries: 5 short YouTube search queries, max 3-4 words each. 
+ALWAYS include the main person's last name. 
+Focus on recent speeches, hearings, press conferences, reactions.
+Example for Swalwell assault: ["Swalwell assault", "Swalwell allegations", "Swalwell governor resign", "Swalwell staffer news", "Swalwell California"]
+
 Return exactly:
 {{
   "people": ["Person Name 1", "Person Name 2"],
   "main_person": "Most important person causing drama or conflict",
   "drama_type": "brief description of the conflict/drama",
   "video_search_queries": [
-    "query 1 - person name + speech/statement/reaction",
-    "query 2 - topic + press conference/hearing",
-    "query 3 - broader topic news",
-    "query 4 - C-SPAN specific search",
-    "query 5 - alternative angle"
+    "LastName keyword1 keyword2",
+    "LastName keyword3 keyword4",
+    "LastName news statement",
+    "LastName press conference",
+    "LastName drama_keyword"
   ],
   "pexels_query": "fallback stock footage query"
 }}
@@ -615,6 +620,11 @@ def find_best_video_clips(analysis, seen_ids=None):
         yt_queries.append(f"{main_person} press conference 2025")
     # Pipeline'dan gelen sorgular
     yt_queries += queries[:3]
+    # Sadece isimle de ara - yeni haberler icin
+    if main_person:
+        yt_queries.append(main_person)
+        last_name = main_person.split()[-1]
+        yt_queries.append(f"{last_name} {drama_type[:20]}")
 
     for query in yt_queries[:6]:
         if len(video_clips) >= 4:
