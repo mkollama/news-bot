@@ -585,8 +585,8 @@ def find_best_video_clips(analysis, seen_ids=None):
                     person_words = main_person.lower().split()
                     title_lower = title.lower()
                     # En az soyadi eslemeli
-                    last_name = person_words[-1] if person_words else ""
-                    if last_name and last_name not in title_lower:
+                    matches = sum(1 for w in person_words if w in title_lower)
+                    if len(person_words) >= 2 and matches < 2:
                         print(f"C-SPAN atlandi (kisi yok): {title[:50]}")
                         continue
 
