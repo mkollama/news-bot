@@ -692,11 +692,29 @@ def create_video(article, audio_path, output_path, analysis, youtube_videos):
             except Exception as e:
                 print(f"Wikipedia hatasi {person}: {e}")
 
-    # Pexels fotograflar - habere ozel sorgular, Capitol/WH her video ayni olmasin
-    import random
+    # Pexels fotograflar - habere ozel sorgular
     pexels_query = analysis.get("pexels_query", "Washington DC politics")
     main_person = analysis.get("main_person", "")
     drama_type = analysis.get("drama_type", "")
+    drama_lower = drama_type.lower()
+
+    queries = [pexels_query]
+    if people:
+        queries.append(f"{people[0]} politician speech")
+    if any(w in drama_lower for w in ["court", "trial", "judge", "legal"]):
+        queries.append("courtroom judge gavel")
+    elif any(w in drama_lower for w in ["war", "military", "attack", "bomb"]):
+        queries.append("military soldiers combat")
+    elif any(w in drama_lower for w in ["protest", "rally", "march"]):
+        queries.append("protest crowd rally street")
+    elif any(w in drama_lower for w in ["assault", "scandal", "misconduct"]):
+        queries.append("investigation crime news")
+    elif any(w in drama_lower for w in ["vote", "bill", "legislation"]):
+        queries.append("Congress Senate chamber")
+    elif any(w in drama_lower for w in ["election", "campaign"]):
+        queries.append("election campaign rally voters")
+    else:
+        queries.append("government politics news")
     
     # Habere ozel sorgular olustur
     specific_queries = []
