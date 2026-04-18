@@ -128,13 +128,17 @@ def get_wikipedia_photo(person_name):
 def search_youtube_for_video(query, max_results=3, recent=False):
     """YouTube'da video ara - recent=True ise son 24 saat"""
     try:
-        sp = "EgIYAQ%3D%3D" if recent else "EgIQAQ%3D%3D"  # 24 saat veya bu ay
+        sp = "EgIYAQ%3D%3D" if recent else "EgIQAQ%3D%3D"
         result = subprocess.run([
             "yt-dlp",
             "--no-download",
             "--print", "%(id)s\t%(title)s\t%(thumbnail)s\t%(duration)s",
             "--playlist-end", str(max_results),
             "--match-filter", "duration < 3600",
+            "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
+            "--add-header", "Accept-Language:en-US,en;q=0.9",
+            "--no-check-certificates",
+            "--extractor-args", "youtube:player_client=web",
             f"https://www.youtube.com/results?search_query={query.replace(' ', '+')}&sp={sp}"
         ], capture_output=True, text=True, timeout=60)
 
@@ -166,6 +170,10 @@ def search_cspan_youtube(query):
             "--no-download",
             "--print", "%(id)s\t%(title)s\t%(thumbnail)s",
             "--playlist-end", "3",
+            "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
+            "--add-header", "Accept-Language:en-US,en;q=0.9",
+            "--no-check-certificates",
+            "--extractor-args", "youtube:player_client=web",
             f"https://www.youtube.com/@CSPAN/search?query={query.replace(' ', '+')}"
         ], capture_output=True, text=True, timeout=45)
 
@@ -197,10 +205,14 @@ def download_youtube_clip(youtube_url, start_seconds, duration_seconds, output_p
             "yt-dlp",
             "-f", "best[height<=720][ext=mp4]/best[height<=720]/best",
             "--no-playlist",
+            "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
+            "--add-header", "Accept-Language:en-US,en;q=0.9",
+            "--no-check-certificates",
+            "--extractor-args", "youtube:player_client=web",
             "-o", str(temp_path),
             youtube_url
         ], capture_output=True, text=True, timeout=120)
-
+       
         if result.returncode != 0 or not temp_path.exists():
             return None
 
