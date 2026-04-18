@@ -934,9 +934,36 @@ def generate_audio_edge(script, output_path):
 
 def generate_audio(script, output_path):
     send_telegram("Seslendirme yapiliyor...")
-    # Edge TTS aktif - ucretsiz ve sinırsiz
-    # ElevenLabs kullanmak icin: generate_audio_elevenlabs(script, output_path)
-    return generate_audio_edge(script, output_path)
+    # gTTS aktif - ucretsiz
+    # ElevenLabs icin su satiri degistir: return generate_audio_elevenlabs(script, output_path)
+    from gtts import gTTS
+    import shutil
+
+    chunks = [script[i:i+4500] for i in range(0, len(script), 4500)]
+    audio_files = []
+
+    for i, chunk in enumerate(chunks):
+        chunk_path = str(OUTPUT_DIR / f"audio_chunk_{i}.mp3")
+        tts = gTTS(text=chunk, lang="en", tld="com", slow=False)
+        tts.save(chunk_path)
+        audio_files.append(chunk_path)
+
+    if len(audio_files) == 1:
+        shutil.copy(audio_files[0], str(output_path))
+    else:
+        list_file = OUTPUT_DIR / "audio_list.txt"
+        with open(list_file, "w") as f:
+            for af in audio_files:
+                f.write(f"file '{os.path.abspath(af)}'\n")
+        subprocess.run([
+            "ffmpeg", "-f", "concat", "-safe", "0",
+            "-i", str(list_file), "-c", "copy", str(output_path), "-y"
+        ], check=True)
+        for af in audio_files:
+            os.remove(af)
+        os.remove(str(list_file))
+
+    return output_path
 
 def generate_metadata(article, hook_title, analysis):
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
