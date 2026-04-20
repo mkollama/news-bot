@@ -997,7 +997,7 @@ def generate_audio_edge(script, output_path):
     # ElevenLabs mUfWEBhcigm8YlCDbmGP sesine en yakin
     EDGE_VOICE = "en-US-GuyNeural"
 
-    chunks = [script[i:i+4500] for i in range(0, len(script), 4500)]
+    chunks = [script[i:i+4000] for i in range(0, len(script), 4000)]
     audio_files = []
 
     async def synthesize(text, path):
