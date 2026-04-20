@@ -954,7 +954,7 @@ def generate_audio_elevenlabs(script, output_path):
     """ElevenLabs TTS - su an deaktif, ileride kullanmak icin sakla"""
     url = f"https://api.elevenlabs.io/v1/text-to-speech/{VOICE_ID}"
     headers = {"xi-api-key": ELEVENLABS_API_KEY, "Content-Type": "application/json"}
-    chunks = [script[i:i+4500] for i in range(0, len(script), 4500)]
+    chunks = [script[i:i+4000] for i in range(0, len(script), 4000)]
     audio_files = []
 
     for i, chunk in enumerate(chunks):
