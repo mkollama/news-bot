@@ -1083,7 +1083,7 @@ def generate_audio(script, output_path):
                 f.write(response.content)
             audio_files.append(chunk_path)
         else:
-            send_telegram(f"OpenAI TTS hatasi: {response.status_code} - gTTS'e geciliyor")
+            send_telegram(f"OpenAI TTS hatasi: {response.status_code} - {response.text[:200]}")
             return generate_audio_gtts(script, output_path)
 
     if len(audio_files) == 1:
