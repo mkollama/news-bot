@@ -954,7 +954,7 @@ def generate_audio_elevenlabs(script, output_path):
     """ElevenLabs TTS - su an deaktif, ileride kullanmak icin sakla"""
     url = f"https://api.elevenlabs.io/v1/text-to-speech/{VOICE_ID}"
     headers = {"xi-api-key": ELEVENLABS_API_KEY, "Content-Type": "application/json"}
-    chunks = [script[i:i+4000] for i in range(0, len(script), 4000)]
+    chunks = [script[i:i+3500] for i in range(0, len(script), 3500)]
     audio_files = []
 
     for i, chunk in enumerate(chunks):
@@ -997,7 +997,7 @@ def generate_audio_edge(script, output_path):
     # ElevenLabs mUfWEBhcigm8YlCDbmGP sesine en yakin
     EDGE_VOICE = "en-US-GuyNeural"
 
-    chunks = [script[i:i+4000] for i in range(0, len(script), 4000)]
+    chunks = [script[i:i+3500] for i in range(0, len(script), 3500)]
     audio_files = []
 
     async def synthesize(text, path):
@@ -1031,7 +1031,7 @@ def generate_audio_gtts(script, output_path):
     """gTTS - ucretsiz, yedek olarak sakla"""
     from gtts import gTTS
     import shutil
-    chunks = [script[i:i+4500] for i in range(0, len(script), 4500)]
+    chunks = [script[i:i+3500] for i in range(0, len(script), 3500)]
     audio_files = []
     for i, chunk in enumerate(chunks):
         chunk_path = str(OUTPUT_DIR / f"audio_chunk_{i}.mp3")
@@ -1059,7 +1059,7 @@ def generate_audio(script, output_path):
     # ElevenLabs icin: return generate_audio_elevenlabs(script, output_path)
     import shutil
 
-    chunks = [script[i:i+4500] for i in range(0, len(script), 4500)]
+    chunks = [script[i:i+3500] for i in range(0, len(script), 3500)]
     audio_files = []
 
     for i, chunk in enumerate(chunks):
@@ -1071,7 +1071,7 @@ def generate_audio(script, output_path):
                 "Content-Type": "application/json"
             },
             json={
-                "model": "tts-1",
+                "model": "gpt-4o-mini-tts",
                 "input": chunk,
                 "voice": "nova",
                 "speed": 1.05
